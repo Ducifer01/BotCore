@@ -553,6 +553,23 @@ client.on('interactionCreate', async (interaction) => {
         if (!channel || channel.type !== ChannelType.GuildText) {
           return interaction.reply({ content: 'Este botão deve ser usado em um canal de texto.', ephemeral: true });
         }
+        // Impedir mais de um tópico por usuário: verifica threads ativas e se o usuário já é membro de alguma
+        try {
+          const active = await channel.threads.fetchActive();
+          let existing = null;
+          for (const [, th] of active.threads) {
+            if (verifyThreads.get(th.id)?.targetUserId === interaction.user.id) { existing = th; break; }
+          }
+          if (!existing) {
+            for (const [, th] of active.threads) {
+              const isMember = await th.members.fetch(interaction.user.id).then(() => true).catch(() => false);
+              if (isMember) { existing = th; break; }
+            }
+          }
+          if (existing) {
+            return interaction.reply({ content: `Você já possui um ticket aberto: <#${existing.id}>`, ephemeral: true });
+          }
+        } catch {}
         const thread = await channel.threads.create({
           name: `${interaction.user.username}`.slice(0, 90),
           autoArchiveDuration: 1440,
@@ -690,15 +707,17 @@ client.on('interactionCreate', async (interaction) => {
         }
         const threadId = customId.split(':')[2];
         const thread = await interaction.guild.channels.fetch(threadId).catch(() => null);
-        if (!thread) return interaction.reply({ content: 'Tópico não encontrado.', ephemeral: true });
-        try {
+            if (!thread) return interaction.reply({ content: 'Tópico não encontrado.', ephemeral: true });
+            // Reconhecimento imediato da interação para evitar "interação falhou"
+            try { await interaction.deferReply({ flags: 64 }); } catch {}
+            try {
           // Mensagem de encerramento com countdown de 5s
           const closeMsg = await thread.send({ content: `Ticket encerrado por <@${interaction.user.id}>, fechando em <t:${Math.floor((Date.now()+5000)/1000)}:R>.` }).catch(() => null);
           // Trava e arquiva imediatamente
           await thread.setLocked(true).catch(() => {});
           await thread.setArchived(true, 'Encerrado pelo verificador').catch(() => {});
-          // Resposta ephemera para quem clicou
-          await interaction.reply({ content: 'Encerrando o tópico em 5 segundos...', flags: 64 }).catch(() => {});
+              // Atualiza a resposta ephemera para quem clicou
+              try { await interaction.editReply({ content: 'Encerrando o tópico em 5 segundos...' }); } catch {}
           // Aguarda 5 segundos e tenta excluir o tópico
           setTimeout(async () => {
             try {
@@ -706,7 +725,13 @@ client.on('interactionCreate', async (interaction) => {
             } catch {}
           }, 5000);
         } catch (e) {
-          await interaction.reply({ content: 'Falha ao encerrar tópico.', flags: 64 }).catch(() => {});
+              try {
+                if (interaction.deferred || interaction.replied) {
+                  await interaction.editReply({ content: 'Falha ao encerrar tópico.' }).catch(() => {});
+                } else {
+                  await interaction.reply({ content: 'Falha ao encerrar tópico.', flags: 64 }).catch(() => {});
+                }
+              } catch {}
         }
       } else if (customId.startsWith('menu:')) {
         // Subnavegações do /menu - gate global via POSSE_USER_ID
@@ -1047,7 +1072,13 @@ client.on('messageCreate', async (message) => {
     if (!isInsta) return;
 
     const att = message.attachments?.first();
-    if (!att) return; // apenas mídias
+    if (!att) {
+      // Em canais de insta, não permitimos mensagens sem mídia; apaga em silêncio
+      if (isInsta) {
+        await message.delete().catch(() => {});
+      }
+      return;
+    }
     // verificação obrigatória
   const isVerified = !!(await prisma.verifiedUserGlobal.findUnique({ where: { userId: message.author.id } }));
     if (!isVerified) {

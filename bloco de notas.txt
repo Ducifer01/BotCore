@@ -30,3 +30,12 @@ use de maneira inteligente e organizada.
 // - O girls recebia repost via outro bot (mensagem de autor bot, não webhook). Antes ignorávamos qualquer bot e não limpávamos.
 // - Agora: durante a janela de bloqueio pós-delete (6s), também apagamos mensagens de outros bots (exceto o próprio bot) no canal de insta.
 //   Assim boys e girls ficam 100% consistentes e não há repost indevido.
+// 2025-12-04 — Único ticket por usuário
+// - No handler verify:open, busco threads ativas no canal do painel e verifico se o usuário já é membro ou está mapeado em verifyThreads.
+// - Se existir, respondo de forma ephemeral apontando para o tópico atual e não crio outro.
+// 2025-12-04 — Evitar "interação falhou" no Encerrar
+// - No verify:close passei a chamar deferReply(flags:64) imediatamente, e depois faço editReply. Assim a interação é reconhecida
+//   em menos de 3s e o banner vermelho deixa de aparecer, mesmo com operações mais lentas (lock/archive/delete).
+// 2025-12-04 — Insta: bloquear mensagens sem mídia
+// - Em canais insta (boys/girls), qualquer mensagem sem attachment é apagada silenciosamente. O fluxo de winners e repost por webhook
+//   não é afetado (mensagens de webhook são ignoradas fora da janela de bloqueio e o bot próprio é preservado).
