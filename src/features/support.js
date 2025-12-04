@@ -239,9 +239,29 @@ async function handleSupportClose(interaction, threadId) {
   return closeTicket(interaction, threadId, { allowAuthor: false });
 }
 
+async function handleSupportInteraction(interaction) {
+  if (!interaction.isButton()) return false;
+  const customId = interaction.customId;
+  if (customId === 'support:open') {
+    await handleSupportOpen(interaction);
+    return true;
+  }
+  if (customId.startsWith('support:close:')) {
+    const threadId = customId.split(':')[2];
+    if (!threadId) {
+      await interaction.reply({ content: 'Ticket inválido.', ephemeral: true });
+      return true;
+    }
+    await handleSupportClose(interaction, threadId);
+    return true;
+  }
+  return false;
+}
+
 module.exports = {
   buildSupportConfigEmbed,
   getSupportPanelPayload,
   handleSupportOpen,
   handleSupportClose,
+  handleSupportInteraction,
 };

@@ -1,0 +1,65 @@
+const { EmbedBuilder, StringSelectMenuBuilder, ActionRowBuilder } = require('discord.js');
+
+function buildBaseMenuEmbed() {
+  return new EmbedBuilder()
+    .setTitle('Menu de Configuração')
+    .setDescription('Selecione uma seção para configurar.')
+    .setColor(0x5865F2);
+}
+
+function buildRootSelect() {
+  return new StringSelectMenuBuilder()
+    .setCustomId('menu:root')
+    .setPlaceholder('Escolha uma seção...')
+    .addOptions([
+      { label: 'Configurar Insta', value: 'insta', description: 'Canais e opções do Instagram' },
+      { label: 'Configurar Mute', value: 'mute', description: 'Cargo mutado, canal de desbloqueio e bot responsável' },
+      { label: 'Configurar Suporte', value: 'support', description: 'Painel, cargos e logs do suporte' },
+    ]);
+}
+
+function createMenuHandler({ insta, mute, support }) {
+  async function handleInteraction(interaction, ctx) {
+    if (interaction.isStringSelectMenu() && interaction.customId === 'menu:root') {
+      return handleRootSelection(interaction, ctx);
+    }
+    if (interaction.isButton() && interaction.customId === 'menu:back') {
+      return handleBack(interaction);
+    }
+    return false;
+  }
+
+  async function handleRootSelection(interaction, ctx) {
+    const { POSSE_USER_ID } = ctx;
+    if (!POSSE_USER_ID || POSSE_USER_ID !== interaction.user.id) {
+      await interaction.reply({ content: 'Apenas o usuário posse pode usar este comando.', ephemeral: true });
+      return true;
+    }
+    const choice = interaction.values?.[0];
+    if (choice === 'insta') {
+      return insta.presentMenu(interaction, ctx);
+    }
+    if (choice === 'mute') {
+      return mute.presentMenu(interaction, ctx);
+    }
+    if (choice === 'support') {
+      return support.presentMenu(interaction, ctx);
+    }
+    return false;
+  }
+
+  async function handleBack(interaction) {
+    const embed = buildBaseMenuEmbed();
+    const row = new ActionRowBuilder().addComponents(buildRootSelect());
+    await interaction.update({ embeds: [embed], components: [row] });
+    return true;
+  }
+
+  return { handleInteraction };
+}
+
+module.exports = {
+  createMenuHandler,
+  buildBaseMenuEmbed,
+  buildRootSelect,
+};
