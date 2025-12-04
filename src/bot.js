@@ -1017,15 +1017,26 @@ client.on('messageCreate', async (message) => {
 // Monitorar mensagens nos canais insta
 client.on('messageCreate', async (message) => {
   try {
-    if (message.author.bot || !message.guild) return;
+    if (!message.guild) return;
     if (!isGuildAllowed(message.guildId)) return;
     const prisma = getPrisma();
   const cfg = await getGlobalConfig(prisma);
     if (!cfg) return;
     const isInsta = message.channelId === cfg.instaBoysChannelId || message.channelId === cfg.instaGirlsChannelId;
+    // Mensagens de webhook: durante janela de bloqueio, apaga; caso contrário, ignora
     // Se for mensagem de webhook, nunca processe como entrada de insta; opcionalmente, limpe se estiver em janela de bloqueio
     if (message.webhookId) {
       if (isInsta) {
+        const until = instaWebhookBlock.get(message.channelId) || 0;
+        if (Date.now() < until) {
+          await message.delete().catch(() => {});
+        }
+      }
+      return;
+    }
+    // Mensagens de outros bots: durante janela de bloqueio, apaga; caso contrário, ignora
+    if (message.author.bot) {
+      if (isInsta && message.author.id !== message.client.user.id) {
         const until = instaWebhookBlock.get(message.channelId) || 0;
         if (Date.now() < until) {
           await message.delete().catch(() => {});
