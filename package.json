@@ -1,0 +1,26 @@
+{
+  "name": "bot-manutencao",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/bot.js",
+    "dev": "npx nodemon src/bot.js",
+    "register:dev": "node src/deploy-commands.js",
+    "prisma:generate": "npx prisma generate",
+    "prisma:migrate": "npx prisma migrate dev --name init",
+    "commands:cleanup": "node src/cleanup-commands.js"
+  },
+  "dependencies": {
+    "@discordjs/voice": "^0.19.0",
+    "@prisma/client": "^5.17.0",
+    "@snazzah/davey": "^0.1.8",
+    "discord.js": "^14.15.3",
+    "dotenv": "^16.4.5",
+    "libsodium-wrappers": "^0.7.15"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0",
+    "prisma": "^5.17.0"
+  }
+}

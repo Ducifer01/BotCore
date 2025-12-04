@@ -1,0 +1,62 @@
+// Prisma schema for SQLite
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Guild {
+  id            String  @id @map("guild_id")
+  name          String?
+  posseUserId   String? // superusuário da guild que pode tudo
+  createdAt     DateTime @default(now())
+  commandConfigs CommandConfig[]
+  auditLogs     AuditLog[]
+}
+
+model CommandConfig {
+  id        Int     @id @default(autoincrement())
+  guildId   String
+  name      String
+  enabled   Boolean @default(true)
+  allowedUsers AllowedUser[]
+  allowedRoles AllowedRole[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  guild Guild @relation(fields: [guildId], references: [id], onDelete: Cascade)
+
+  @@unique([guildId, name])
+}
+
+model AllowedUser {
+  id        Int    @id @default(autoincrement())
+  commandId Int
+  userId    String
+  command   CommandConfig @relation(fields: [commandId], references: [id], onDelete: Cascade)
+
+  @@unique([commandId, userId])
+}
+
+model AllowedRole {
+  id        Int    @id @default(autoincrement())
+  commandId Int
+  roleId    String
+  command   CommandConfig @relation(fields: [commandId], references: [id], onDelete: Cascade)
+
+  @@unique([commandId, roleId])
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  guildId   String
+  actorId   String
+  action    String
+  details   String?
+  createdAt DateTime  @default(now())
+
+  guild Guild @relation(fields: [guildId], references: [id], onDelete: Cascade)
+}
