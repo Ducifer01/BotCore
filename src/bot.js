@@ -84,6 +84,19 @@ function buildInstaEmbed(cfg) {
     .setColor(0x2c2f33);
 }
 
+// Helper: embed de configuração do Mute
+function buildMuteEmbed(cfg) {
+  const lines = [
+    `• Bot responsável: ${cfg?.muteBotId ? `<@${cfg.muteBotId}>` : 'não definido'}`,
+    `• Cargo Mutado: ${cfg?.muteRoleId ? `<@&${cfg.muteRoleId}>` : 'não definido'}`,
+    `• Canal de desbloqueio: ${cfg?.muteUnlockChannelId ? `<#${cfg.muteUnlockChannelId}>` : 'não definido'}`,
+  ].join('\n');
+  return new EmbedBuilder()
+    .setTitle('Configurar Mute')
+    .setDescription(`Defina o cargo mutado, o canal de desbloqueio e o bot responsável.\n\n${lines}`)
+    .setColor(0x2c2f33);
+}
+
 const commandsPath = path.join(__dirname, 'commands');
 const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
 for (const file of commandFiles) {
@@ -91,6 +104,14 @@ for (const file of commandFiles) {
   if (command?.data && command?.execute) {
     client.commands.set(command.data.name, command);
   }
+}
+
+// Registrar features modulares
+try {
+  const { registerMuteFeature } = require('./features/mute');
+  registerMuteFeature(client);
+} catch (e) {
+  console.warn('[init] Mute feature não carregada:', e?.message || e);
 }
 
 async function syncSlashCommands() {
@@ -207,6 +228,22 @@ client.on('interactionCreate', async (interaction) => {
             new ButtonBuilder().setCustomId('menu:insta:unverify').setLabel('Cancelar Verificação').setStyle(ButtonStyle.Danger),
           );
           await interaction.update({ embeds: [embed], components: [row1, row2] });
+        } else if (choice === 'mute') {
+          const cfg = await getGlobalConfig(prisma);
+          const embed = buildMuteEmbed(cfg);
+          const rowTop = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('menu:back').setLabel('Voltar').setStyle(ButtonStyle.Secondary),
+          );
+          const row1 = new ActionRowBuilder().addComponents(
+            new RoleSelectMenuBuilder().setCustomId('menu:mute:role:set').setPlaceholder('Selecione o cargo Mutado').setMinValues(1).setMaxValues(1)
+          );
+          const row2 = new ActionRowBuilder().addComponents(
+            new ChannelSelectMenuBuilder().setCustomId('menu:mute:unlock:set').setPlaceholder('Selecione o canal de voz de desbloqueio').setMinValues(1).setMaxValues(1).addChannelTypes(ChannelType.GuildVoice)
+          );
+          const row3 = new ActionRowBuilder().addComponents(
+            new UserSelectMenuBuilder().setCustomId('menu:mute:bot:set').setPlaceholder('Selecione o bot responsável').setMinValues(1).setMaxValues(1)
+          );
+          await interaction.update({ embeds: [embed], components: [rowTop, row1, row2, row3] });
         }
       } else if (customId.startsWith('menu:insta:set:')) {
         // Salvar canal de boys/girls
@@ -278,7 +315,7 @@ client.on('interactionCreate', async (interaction) => {
           data: mode === 'boys' ? { instaBoysChannelId: channelId } : { instaGirlsChannelId: channelId },
         });
         await interaction.update({ content: `Canal de Insta ${mode === 'boys' ? 'Boys' : 'Girls'} definido: <#${channelId}>`, embeds: [], components: [] });
-      } else if (customId === 'menu:insta:pings:set') {
+      } else if (customId === 'menu:insta:verifypanel:set') {
         const prisma = getPrisma();
         if (!POSSE_USER_ID || POSSE_USER_ID !== interaction.user.id) {
           return interaction.reply({ content: 'Apenas o usuário posse pode usar este comando.', ephemeral: true });
@@ -304,6 +341,42 @@ client.on('interactionCreate', async (interaction) => {
             new ButtonBuilder().setCustomId('menu:insta:verifypanel').setLabel('Painel Verifique-se').setStyle(ButtonStyle.Secondary),
             new ButtonBuilder().setCustomId('menu:insta:unverify').setLabel('Cancelar Verificação').setStyle(ButtonStyle.Danger),
           );
+      } else if (customId === 'menu:mute:role:set') {
+        const prisma = getPrisma();
+        if (!POSSE_USER_ID || POSSE_USER_ID !== interaction.user.id) {
+          return interaction.reply({ content: 'Apenas o usuário posse pode usar este comando.', ephemeral: true });
+        }
+        const roleId = interaction.values?.[0];
+        if (!roleId) {
+          return interaction.reply({ content: 'Seleção inválida.', ephemeral: true });
+        }
+        const cfg = await ensureGlobalConfig(prisma);
+        await prisma.globalConfig.update({ where: { id: cfg.id }, data: { muteRoleId: roleId } });
+        await interaction.update({ content: `Cargo mutado definido: <@&${roleId}>`, embeds: [], components: [] });
+      } else if (customId === 'menu:mute:unlock:set') {
+        const prisma = getPrisma();
+        if (!POSSE_USER_ID || POSSE_USER_ID !== interaction.user.id) {
+          return interaction.reply({ content: 'Apenas o usuário posse pode usar este comando.', ephemeral: true });
+        }
+        const channelId = interaction.values?.[0];
+        if (!channelId) {
+          return interaction.reply({ content: 'Seleção inválida.', ephemeral: true });
+        }
+        const cfg = await ensureGlobalConfig(prisma);
+        await prisma.globalConfig.update({ where: { id: cfg.id }, data: { muteUnlockChannelId: channelId } });
+        await interaction.update({ content: `Canal de desbloqueio definido: <#${channelId}>`, embeds: [], components: [] });
+      } else if (customId === 'menu:mute:bot:set') {
+        const prisma = getPrisma();
+        if (!POSSE_USER_ID || POSSE_USER_ID !== interaction.user.id) {
+          return interaction.reply({ content: 'Apenas o usuário posse pode usar este comando.', ephemeral: true });
+        }
+        const userId = interaction.values?.[0];
+        if (!userId) {
+          return interaction.reply({ content: 'Seleção inválida.', ephemeral: true });
+        }
+        const cfg = await ensureGlobalConfig(prisma);
+        await prisma.globalConfig.update({ where: { id: cfg.id }, data: { muteBotId: userId } });
+        await interaction.update({ content: `Bot responsável definido: <@${userId}>`, embeds: [], components: [] });
           await interaction.update({ content: `Cargos notificados atualizados: ${roleIds.map(id => `<@&${id}>`).join(', ') || 'nenhum'}`, embeds: [refreshed], components: [row1, row2] });
       } else if (customId === 'menu:insta:photos:set') {
         const prisma = getPrisma();
@@ -341,7 +414,7 @@ client.on('interactionCreate', async (interaction) => {
           new ButtonBuilder().setCustomId('menu:insta:unverify').setLabel('Cancelar Verificação').setStyle(ButtonStyle.Danger),
         );
         await interaction.update({ content: `Cargo principal definido: <@&${roleId}>`, embeds: [refreshed], components: [row1, row2] });
-      } else if (customId === 'menu:insta:verifiedrole:set') {
+      } else if (customId === 'menu:mute:role:set') {
         const prisma = getPrisma();
         if (!POSSE_USER_ID || POSSE_USER_ID !== interaction.user.id) {
           return interaction.reply({ content: 'Apenas o usuário posse pode usar este comando.', ephemeral: true });
@@ -351,9 +424,10 @@ client.on('interactionCreate', async (interaction) => {
           return interaction.reply({ content: 'Seleção inválida.', ephemeral: true });
         }
         const cfg = await ensureGlobalConfig(prisma);
-        await prisma.globalConfig.update({ where: { id: cfg.id }, data: { verifiedRoleId: roleId } });
-        await interaction.update({ content: `Cargo verificado definido: <@&${roleId}>`, embeds: [], components: [] });
-      } else if (customId === 'menu:insta:verifypanel:set') {
+        await prisma.globalConfig.update({ where: { id: cfg.id }, data: { muteRoleId: roleId } });
+        const info = new EmbedBuilder().setTitle('Mute atualizado').setDescription(`Cargo mutado definido: <@&${roleId}>`).setColor(0x2c2f33);
+        await interaction.reply({ embeds: [info], ephemeral: true });
+      } else if (customId === 'menu:mute:unlock:set') {
         const prisma = getPrisma();
         if (!POSSE_USER_ID || POSSE_USER_ID !== interaction.user.id) {
           return interaction.reply({ content: 'Apenas o usuário posse pode usar este comando.', ephemeral: true });
@@ -363,22 +437,22 @@ client.on('interactionCreate', async (interaction) => {
           return interaction.reply({ content: 'Seleção inválida.', ephemeral: true });
         }
         const cfg = await ensureGlobalConfig(prisma);
-        await prisma.globalConfig.update({ where: { id: cfg.id }, data: { verifyPanelChannelId: channelId } });
-        try {
-          const guild = interaction.guild;
-          const panelChannel = guild.channels.cache.get(channelId) || await guild.channels.fetch(channelId).catch(() => null);
-          if (panelChannel && panelChannel.isTextBased()) {
-            const panelEmbed = new EmbedBuilder()
-              .setTitle('Verifique-se')
-              .setDescription('Clique no botão abaixo para abrir um tópico privado com nossa equipe de verificação. Aguarde um responsável responder.\n\nRequisitos:\n- Enviar imagem quando solicitado.')
-              .setColor(0x5865F2);
-            const panelRow = new ActionRowBuilder().addComponents(
-              new ButtonBuilder().setCustomId('verify:open').setLabel('Iniciar Verificação').setStyle(ButtonStyle.Primary)
-            );
-            await panelChannel.send({ embeds: [panelEmbed], components: [panelRow] });
-          }
-        } catch {}
-        await interaction.update({ content: `Painel de verificação definido: <#${channelId}>`, embeds: [], components: [] });
+        await prisma.globalConfig.update({ where: { id: cfg.id }, data: { muteUnlockChannelId: channelId } });
+        const info = new EmbedBuilder().setTitle('Mute atualizado').setDescription(`Canal de desbloqueio definido: <#${channelId}>`).setColor(0x2c2f33);
+        await interaction.reply({ embeds: [info], ephemeral: true });
+      } else if (customId === 'menu:mute:bot:set') {
+        const prisma = getPrisma();
+        if (!POSSE_USER_ID || POSSE_USER_ID !== interaction.user.id) {
+          return interaction.reply({ content: 'Apenas o usuário posse pode usar este comando.', ephemeral: true });
+        }
+        const userId = interaction.values?.[0];
+        if (!userId) {
+          return interaction.reply({ content: 'Seleção inválida.', ephemeral: true });
+        }
+        const cfg = await ensureGlobalConfig(prisma);
+        await prisma.globalConfig.update({ where: { id: cfg.id }, data: { muteBotId: userId } });
+        const info = new EmbedBuilder().setTitle('Mute atualizado').setDescription(`Bot responsável definido: <@${userId}>`).setColor(0x2c2f33);
+        await interaction.reply({ embeds: [info], ephemeral: true });
       } else if (customId === 'menu:insta:unverify:set') {
         // Cancelar verificação de um usuário selecionado
         const prisma = getPrisma();
@@ -743,8 +817,11 @@ client.on('interactionCreate', async (interaction) => {
         const parts = customId.split(':');
         const area = parts[1];
         if (area === 'back') {
-          const baseEmbed = new EmbedBuilder().setTitle('Menu de Configuração').setDescription('Selecione uma seção para configurar. Por enquanto: Insta.').setColor(0x5865F2);
-          const menu = new StringSelectMenuBuilder().setCustomId('menu:root').setPlaceholder('Escolha uma seção...').addOptions([{ label: 'Configurar Insta', value: 'insta', description: 'Canais e opções do Instagram' }]);
+          const baseEmbed = new EmbedBuilder().setTitle('Menu de Configuração').setDescription('Selecione uma seção para configurar.').setColor(0x5865F2);
+          const menu = new StringSelectMenuBuilder().setCustomId('menu:root').setPlaceholder('Escolha uma seção...').addOptions([
+            { label: 'Configurar Insta', value: 'insta', description: 'Canais e opções do Instagram' },
+            { label: 'Configurar Mute', value: 'mute', description: 'Cargo mutado, canal de desbloqueio e bot responsável' }
+          ]);
           const row = new ActionRowBuilder().addComponents(menu);
           return interaction.update({ embeds: [baseEmbed], components: [row] });
         }
@@ -816,6 +893,21 @@ client.on('interactionCreate', async (interaction) => {
               .setMaxValues(1);
             const row = new ActionRowBuilder().addComponents(userSelect);
             return interaction.reply({ embeds: [subEmbed], components: [row], ephemeral: true });
+          }
+        } else if (area === 'mute') {
+          const action = parts[2];
+          if (!action) {
+            const subEmbed = new EmbedBuilder().setTitle('Configurar Mute').setDescription('Defina o cargo de mutado, o canal de desbloqueio e o bot responsável.').setColor(0x2c2f33);
+            const row1 = new ActionRowBuilder().addComponents(
+              new RoleSelectMenuBuilder().setCustomId('menu:mute:role:set').setPlaceholder('Selecione o cargo Mutado').setMinValues(1).setMaxValues(1)
+            );
+            const row2 = new ActionRowBuilder().addComponents(
+              new ChannelSelectMenuBuilder().setCustomId('menu:mute:unlock:set').setPlaceholder('Selecione o canal de voz de desbloqueio').setMinValues(1).setMaxValues(1).addChannelTypes(ChannelType.GuildVoice)
+            );
+            const row3 = new ActionRowBuilder().addComponents(
+              new UserSelectMenuBuilder().setCustomId('menu:mute:bot:set').setPlaceholder('Selecione o bot responsável').setMinValues(1).setMaxValues(1)
+            );
+            return interaction.reply({ embeds: [subEmbed], components: [row1, row2, row3], ephemeral: true });
           }
         }
       } else if (customId.startsWith('insta:')) {

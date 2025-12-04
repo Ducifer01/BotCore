@@ -19,6 +19,10 @@ model GlobalConfig {
   instaBoysChannelId   String?
   instaGirlsChannelId  String?
   photosChannelId      String?
+  // Mute feature (global)
+  muteBotId            String?  // ID do bot que é o único autorizado a silenciar/desmutar
+  muteRoleId           String?  // Cargo aplicado a usuários silenciados pelo bot especificado
+  muteUnlockChannelId  String?  // Canal de voz: entrando aqui remove mute se NÃO foi aplicado pelo bot especificado
   // Relacionamentos globais
   ticketPingRolesGlobal TicketPingRoleGlobal[]
   createdAt            DateTime @default(now())

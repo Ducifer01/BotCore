@@ -6,7 +6,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('menu')
     .setDescription('Painel de configuração do bot (apenas usuário posse)')
-    .addStringOption(o => o.setName('escopo').setDescription('Opcional: ir direto para uma seção').addChoices({ name: 'insta', value: 'insta' })),
+  .addStringOption(o => o.setName('escopo').setDescription('Opcional: ir direto para uma seção').addChoices({ name: 'insta', value: 'insta' }, { name: 'mute', value: 'mute' })),
   async execute(interaction) {
     await ensureGuild(interaction.guild);
     const POSSE_USER_ID = String(process.env.POSSE_USER_ID || '').trim();
@@ -22,13 +22,14 @@ module.exports = {
 
     const baseEmbed = new EmbedBuilder()
       .setTitle('Menu de Configuração')
-      .setDescription('Selecione uma seção para configurar. Por enquanto: Insta.')
+  .setDescription('Selecione uma seção para configurar.')
       .setColor(0x5865F2);
     const menu = new StringSelectMenuBuilder()
       .setCustomId('menu:root')
       .setPlaceholder('Escolha uma seção...')
       .addOptions([
-        { label: 'Configurar Insta', value: 'insta', description: 'Canais e opções do Instagram' }
+        { label: 'Configurar Insta', value: 'insta', description: 'Canais e opções do Instagram' },
+        { label: 'Configurar Mute', value: 'mute', description: 'Cargo mutado, canal de desbloqueio e bot responsável' }
       ]);
     const row = new ActionRowBuilder().addComponents(menu);
     await interaction.editReply({ embeds: [baseEmbed], components: [row] });
