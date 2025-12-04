@@ -15,6 +15,10 @@ model Guild {
   createdAt     DateTime @default(now())
   commandConfigs CommandConfig[]
   auditLogs     AuditLog[]
+  config        GuildConfig?
+  verifiedUsers VerifiedUser[]
+  instaPosts    InstaPost[]
+  instaWinners  InstaWinner[]
 }
 
 model CommandConfig {
@@ -57,6 +61,96 @@ model AuditLog {
   action    String
   details   String?
   createdAt DateTime  @default(now())
+
+  guild Guild @relation(fields: [guildId], references: [id], onDelete: Cascade)
+}
+
+model GuildConfig {
+  id                 Int     @id @default(autoincrement())
+  guildId            String  @unique
+  // Verificação
+  verifyPanelChannelId String?
+  mainRoleId         String? // Cargo principal que pode verificar/encerrar
+  verifiedRoleId     String? // Cargo "Verificado"
+  // Cargos para mencionar ao abrir ticket
+  ticketPingRoles    TicketPingRole[]
+  // Insta channels
+  instaBoysChannelId  String?
+  instaGirlsChannelId String?
+
+  guild Guild @relation(fields: [guildId], references: [id], onDelete: Cascade)
+}
+
+model TicketPingRole {
+  id        Int    @id @default(autoincrement())
+  guildConfigId Int
+  roleId    String
+
+  config GuildConfig @relation(fields: [guildConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([guildConfigId, roleId])
+}
+
+model VerifiedUser {
+  id         Int      @id @default(autoincrement())
+  guildId    String
+  userId     String
+  verifiedAt DateTime  @default(now())
+  verifiedBy String?
+
+  guild Guild @relation(fields: [guildId], references: [id], onDelete: Cascade)
+
+  @@unique([guildId, userId])
+}
+
+model InstaPost {
+  // Usamos messageId do webhook como id
+  id           String   @id
+  guildId      String
+  channelId    String
+  authorId     String
+  mediaUrl     String
+  mediaType    String   // image|video|gif|other
+  createdAt    DateTime @default(now())
+  likeCount    Int      @default(0)
+  commentCount Int      @default(0)
+
+  likes     InstaLike[]
+  comments  InstaComment[]
+
+  guild Guild @relation(fields: [guildId], references: [id], onDelete: Cascade)
+}
+
+model InstaLike {
+  id        Int     @id @default(autoincrement())
+  postId    String
+  userId    String
+  createdAt DateTime @default(now())
+
+  post InstaPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+}
+
+model InstaComment {
+  id        Int     @id @default(autoincrement())
+  postId    String
+  userId    String
+  content   String
+  createdAt DateTime @default(now())
+
+  post InstaPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+}
+
+model InstaWinner {
+  id            Int     @id @default(autoincrement())
+  guildId       String
+  channelId     String
+  postId        String
+  winnerUserId  String
+  likeCount     Int
+  winnerMessageId String // mensagem enviada avisando vencedor (para preservar)
+  createdAt     DateTime @default(now())
 
   guild Guild @relation(fields: [guildId], references: [id], onDelete: Cascade)
 }

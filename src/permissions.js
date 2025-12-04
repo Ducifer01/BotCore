@@ -21,6 +21,12 @@ async function ensureCommandConfig(guildId, name) {
 }
 
 async function checkAccess(interaction, commandName) {
+  // Lista de guilds permitidas (mesmo dono), separadas por vírgula no .env
+  const allowedGuilds = String(process.env.ALLOWED_GUILD_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (allowedGuilds.length > 0 && !allowedGuilds.includes(interaction.guildId)) {
+    // Se a guild não está na lista, nega tudo silenciosamente
+    return false;
+  }
   const prisma = getPrisma();
   await ensureGuild(interaction.guild);
   const cfg = await ensureCommandConfig(interaction.guildId, commandName);
