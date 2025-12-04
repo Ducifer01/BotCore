@@ -8,6 +8,83 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Configuração 100% global: eliminar distinções por guild
+model GlobalConfig {
+  id                   Int      @id @default(autoincrement())
+  // Verificação
+  verifyPanelChannelId String?
+  mainRoleId           String?
+  verifiedRoleId       String?
+  // Insta
+  instaBoysChannelId   String?
+  instaGirlsChannelId  String?
+  photosChannelId      String?
+  // Relacionamentos globais
+  ticketPingRolesGlobal TicketPingRoleGlobal[]
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+model TicketPingRoleGlobal {
+  id              Int  @id @default(autoincrement())
+  globalConfigId  Int
+  roleId          String
+  config          GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([globalConfigId, roleId])
+}
+
+model VerifiedUserGlobal {
+  id          Int      @id @default(autoincrement())
+  userId      String   @unique
+  verifiedAt  DateTime @default(now())
+  verifiedBy  String?
+}
+
+// Insta global (sem guildId)
+model InstaPostGlobal {
+  id           String   @id // messageId do webhook
+  channelId    String
+  authorId     String
+  mediaUrl     String
+  mediaType    String   // image|video|gif|other
+  createdAt    DateTime @default(now())
+  likeCount    Int      @default(0)
+  commentCount Int      @default(0)
+
+  likes     InstaLikeGlobal[]
+  comments  InstaCommentGlobal[]
+}
+
+model InstaLikeGlobal {
+  id        Int     @id @default(autoincrement())
+  postId    String
+  userId    String
+  createdAt DateTime @default(now())
+  post      InstaPostGlobal @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+}
+
+model InstaCommentGlobal {
+  id        Int     @id @default(autoincrement())
+  postId    String
+  userId    String
+  content   String
+  createdAt DateTime @default(now())
+  post      InstaPostGlobal @relation(fields: [postId], references: [id], onDelete: Cascade)
+}
+
+model InstaWinnerGlobal {
+  id               Int     @id @default(autoincrement())
+  channelId        String
+  postId           String
+  winnerUserId     String
+  likeCount        Int
+  winnerMessageId  String
+  createdAt        DateTime @default(now())
+}
+
 model Guild {
   id            String  @id @map("guild_id")
   name          String?

@@ -14,6 +14,7 @@ DISCORD_TOKEN=seu_token
 DISCORD_CLIENT_ID=seu_client_id
 DEV_GUILD_ID=sua_guild_dev
 DATABASE_URL="file:./dev.db"
+ALLOWED_GUILD_IDS=ID_GUILD_1,ID_GUILD_2
 ```
 
 2. Instale dependências:
@@ -80,6 +81,7 @@ Uso:
 - Ao iniciar, o bot tenta sincronizar os comandos na guild definida por `DEV_GUILD_ID`. Se não encontrar a guild e `SYNC_GLOBAL_FALLBACK=true`, faz fallback para sincronização global (pode levar até ~1h para aparecer).
 - Para registro imediato na guild, certifique-se de que o bot está presente na guild e foi convidado com os escopos `applications.commands` e `bot`.
 - O script `npm run register:dev` continua disponível como alternativa manual.
+- Para restringir o bot a funcionar apenas em alguns servidores (mesmo dono), defina `ALLOWED_GUILD_IDS` no `.env` com os IDs separados por vírgula. Qualquer interação fora dessa lista será negada pelo bot.
 
 ## Limpando comandos antigos
 - Se comandos antigos permanecerem listados (geralmente por terem sido publicados globalmente antes), você pode:

@@ -1,0 +1,28 @@
+---------------NÃO EDITE ESSA PARTE---------------
+Você deve usar esse ARQUIVO para fazer anotações sobre as mudanças que você vem fazendo, para
+dar contexto para você mesmo, de maneira que você não perca o fio da meada. e fique realmente preciso.
+Lembre-se o que fez anteriormente, o porque fez, etc... Ou seja, aqui vc explica as mudanças e o que fez pensando no futuro. 
+etc... Bem como dicas importantes, para evitar cair em erros que você aprendeu e corrigiu. 
+use de maneira inteligente e organizada.
+----------------NÃO EDITE ESSA PARTE---------------
+
+// 2025-12-04 — Ajustes no /menu Insta, verificação e UX
+// - Criei helper buildInstaEmbed(cfg) para montar um embed limpo e organizado sem codeblock, mostrando estado atual.
+// - Sempre que uma configuração é alterada (boys, girls, pings, photos, mainrole, verifiedrole, verifypanel), rehidrato o embed e reexibo os botões do menu.
+//   Isso mantém o feedback em tempo real no painel de configuração.
+// - Adicionei botão “Cancelar Verificação” no menu Insta. Fluxo: abre UserSelect e, ao selecionar, remove VerifiedUserGlobal e o cargo verificado.
+// - Corrigi import faltante: UserSelectMenuBuilder (evitava ReferenceError).
+// - Alterei verify:confirm para enviar imagem+resumo no canal de fotos (photosChannelId), não dentro do tópico.
+//   OBS: o canal pode estar em outro servidor; por isso troquei para client.channels.fetch(cfg.photosChannelId) ao invés de interaction.guild.channels.fetch.
+// - Corrigi um erro de sintaxe causado por um ‘}’ extra após o bloco do menu (área 'insta').
+// Dicas:
+// - Evitar redeclarar variáveis “embed” em escopos próximos; use nomes como “subEmbed”.
+// - Ao atualizar componentes/embeds após selects, preferir interaction.update com novo embed+rows em vez de limpar tudo (melhor UX).
+// - Deprecação de ephemeral: manter por ora (v14); migrar para flags ao atualizar para v15.
+// 2025-12-04 — Gate de insta com aviso de verificação
+// - Ao detectar mídia em canais de insta por usuário não verificado (não consta em VerifiedUserGlobal), apaga a mensagem e avisa o usuário
+//   para se verificar no canal configurado em verifyPanelChannelId. Mensagem é temporária (autodelete em 8s).
+// - Habilitei o intent GuildMembers para garantir que guildMemberUpdate dispare e a remoção imediata do cargo Verificado funcione.
+// - Corrigi o uso dos cargos de ping na verificação para ticketPingRolesGlobal (modelo global correto), evitando referências antigas.
+// - Hotfix: Alguns webhooks/bots externos repostavam a mídia após o delete. Adicionado bloqueio curto (6s) que remove quaisquer mensagens
+//   de webhook no canal de insta imediatamente após um delete de mídia não verificada. Também ignoramos processamento de mensagens de webhook.

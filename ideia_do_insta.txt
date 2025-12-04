@@ -1,0 +1,61 @@
+Sistema de insta-boys e insta-girls.
+A ideia é um sistema onde existirá 2 canais de instagram. Um focado em homens e outro em mulheres.
+
+
+#Verificação:
+No discord: Os canais criados manualmente, terão permissões especificas. Por exemplo, apenas o cargo Verificado poderá enviar mensagem no canal.
+
+Um canal de "Verifique-se" existirá onde um painel com embed e botão "Verifique-se" existirá. O usuário clica no botão "Verifique-se" e um tópico privado será aberto, para ticket. O tópico deve ser aberto com o nome do usuário (username) que abriu o ticket. O bot irá mencionar lista de cargos (configurável no banco de dados) o usuário que abriu o ticket e o cargo responsável pela verificação. Ou seja, menciona: Lista de cargos personalizado no banco de dados, cargo principal também configurado no banco de dados, e o usuário que abriu o ticket.
+Um embed será enviado com o botão "Verificar" verde e o botão "Encerrar" vermelho. A descrição do embed um texto informativo de que deverá aguardar um responsável pela verificação.
+
+Apenas o cargo principal (configurado na DM) poderá interagir com sucesso com os botões "Verificar" e "Encerrar".
+Ao interagir com "Verificar" o bot enviará um embed ephemeral True (vou chama-lo de embed_verify apenas para referencia aqui no prompt) informando para a pessoa com o cargo principal enviar uma imagem. Essa imagem será um screenshot do rosto da pessoa, que deve ter enviado para a pessoa com cargo principal. Quando a pessoa com cargo principal enviar a imagem, o bot edita o embed embed_verify colocando a imagem que o usuário com cargo principal enviou, apaga a imagem que ele enviou (para deixar chat organizado) e pede para confirmar com 2 botões "Perfeito" verde e "Atualizar" azul. Se o usuário com cargo principal clicar em atualizar, o bot irá pedir novamente para enviar outra foto, e após enviar, pergunta novamente se está ok. Quando finalmente o usuário clicar em "Perfeito" o bot seta o cargo "Verificado" (configurável no banco de dados também) no usuário que abriu o ticket.
+
+Em seguida o bot envia as seguintes informações em formato de texto, com quebra de linhas para organização: @menção | ID do usuário que foi verificado. (quebra de linha), @menção | ID do usuário que interagiu com sucesso com o botão "Perfeito". (quebra de linha) e a imagem anexada.
+
+Deve ser armazenado também o ID do usuário que foi verificado no banco de dados. A ideia é não permitir que o cargo "verificado" seja setado manualmente em usuários que não foram verificados ainda (ou seja, não estão com o ID no banco de dados informando que ja foi verificado). Portanto, se alguem adicionar o cargo em um usuário cujo ID não está no banco de dados, o bot remove.
+
+
+
+#insta boys e insta girls.
+A ideia aqui é a mesma. Teremos 2 canais que fará exatamente a mesma coisa.
+
+Quando um usuário enviar uma midia (foto, vídeo, gifs) em insta boys ou insta girls, PRIMEIRAMENTE, O BOT VERIFICA SE O ID DAQUELE USUÁRIO ESTÁ NO BANCO DE DADOS, PARA SABER SE ELE ESTÁ VERIFICADO, SE NÃO, APENAS APAGA A MIDIA. Caso o usuário esteja no banco de dados e esteja verificado tudo certinho, ai o bot pega a midia recebida, reenvia a imagem usando webhook com embend contendo os botões de "curtir", "comentar" "listar curtidas", "listar comentários" e "Excluir". Todos esses botões não terão nome, apenas Emoji. Exemplo, em "Excluir" emoji de lixeira, etc... Em curtir e comentar deve ter a quantidade de curtidas e comentários entre aspas. Exemplo do botão de curtir -> "❤️ (5)" que deve ser atualizado dinamicamente. Quando alguem adiciona ou remove curtida.
+O webhook deve ser enviado usando a foto de perfil (avatar) do usuário que enviou a midia e o username. A midia que o usuário enviou deve ser excluida após o webhook ser enviado corretamente, para manter organizado. 
+
+So o proprio usuário que enviou a media pode interagir com sucesso com o botão de excluir.
+
+Quando o botão de listar curtidas for interagido, o bot envia em ephemeral true uma lista de pessoas que curtiram a publicação:
+exemplo:
+
+Titulo: Likes do post de <@id>
+
+<@id> #menciona pessoa que curtiu
+<@id> #menciona pessoa que curtiu
+<@id> #menciona pessoa que curtiu
+Página 1/1 - Total: 7 likes
+
+Cor do embed = branco
+Com 2 botões de Voltar e Próximo <- Navbar, para caso exista muitas curtidas.
+
+
+Quando o botão de listar comentários for interagido, o bot envia em ephemeral true uma lista de pessoas que comentaram a publicação:
+
+Titulo: Comentários do post de <@id>
+<@id>: Que foto linda.
+<@id>: Maravilhosa...
+Página 1/1 - Total: 6 comentários
+
+cor do embed = branco
+Com 2 botões de Voltar e Próximo <- Navbar, para caso exista muitos comentários.
+
+
+Comando: /reset_insta Quando esse comando for executado o bot envia embed ephemeral True pedindo para confirmar "Tem certeza?" Botão "Sim"verde e botão "Não" Vermelho". Botão "Não" apenas fecha o embed (apaga). Botão "Sim" ao ser interagido com sucesso (apenas cargo e ou id de pessoa permitida, configurado no bot, poderá interagir com sucesso) reseta os dois canais de instagram, o insta boys e insta girls. 
+
+Ele enviará mensagem seguindo esse formato:
+Ganhador da semana
+<@id>
+<quantidade de curtidas>
+<midia> = Reenvia a midia do ganhador.
+
+E apagará todas as outras midias enviadas pelos usuários, suas curtidas, comentários, etc... OBS: Exceto outras mensagens de ganhadores... 

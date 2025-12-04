@@ -1,51 +1,23 @@
-const { getPrisma } = require('./db');
+// Gate simplificado 100% global
+// - ALLOWED_GUILD_IDS: restringe em quais servidores o bot responde
+// - POSSE_USER_ID: superusuário global que pode sempre executar comandos administrativos
 
 async function ensureGuild(guild) {
-  const prisma = getPrisma();
-  await prisma.guild.upsert({
-    where: { id: guild.id },
-    update: { name: guild.name },
-    create: { id: guild.id, name: guild.name },
-  });
-}
-
-async function ensureCommandConfig(guildId, name) {
-  const prisma = getPrisma();
-  const cfg = await prisma.commandConfig.upsert({
-    where: { guildId_name: { guildId, name } },
-    update: {},
-    create: { guildId, name, enabled: true },
-    include: { allowedUsers: true, allowedRoles: true },
-  });
-  return cfg;
+  // Agora é no-op; mantido por compatibilidade com chamadas existentes
+  return guild;
 }
 
 async function checkAccess(interaction, commandName) {
-  // Lista de guilds permitidas (mesmo dono), separadas por vírgula no .env
   const allowedGuilds = String(process.env.ALLOWED_GUILD_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
-  if (allowedGuilds.length > 0 && !allowedGuilds.includes(interaction.guildId)) {
-    // Se a guild não está na lista, nega tudo silenciosamente
+  if (allowedGuilds.length > 0 && !allowedGuilds.includes(String(interaction.guildId))) {
     return false;
   }
-  const prisma = getPrisma();
-  await ensureGuild(interaction.guild);
-  const cfg = await ensureCommandConfig(interaction.guildId, commandName);
-  if (!cfg.enabled) return false;
-
-  const userId = interaction.user.id;
-  const roleIds = interaction.member?.roles?.valueOf?.() ? interaction.member.roles.valueOf() : interaction.member?.roles?.cache?.map(r => r.id) || [];
-
-  const isAllowedUser = cfg.allowedUsers.some(u => u.userId === userId);
-  const isAllowedRole = cfg.allowedRoles.some(r => roleIds.includes(r.roleId));
-
-  // Superusuário (POSSE) por guild: bypass total
-  const guildRecord = await prisma.guild.findUnique({ where: { id: interaction.guildId } });
-  if (guildRecord?.posseUserId && guildRecord.posseUserId === userId) {
+  const POSSE_USER_ID = String(process.env.POSSE_USER_ID || '').trim();
+  if (POSSE_USER_ID && POSSE_USER_ID === interaction.user.id) {
     return true;
   }
-
-  // Política: somente BD decide. Sem allow-list => bloqueado.
-  return isAllowedUser || isAllowedRole;
+  // Política mínima: se não for POSSE, permitir por padrão (ou ajuste aqui se quiser bloquear)
+  return true;
 }
 
-module.exports = { ensureGuild, ensureCommandConfig, checkAccess };
+module.exports = { ensureGuild, checkAccess };
