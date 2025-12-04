@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { getPrisma } = require('./db');
 const { ensureGuild } = require('./permissions');
+const { buildSupportConfigEmbed, getSupportPanelPayload, handleSupportOpen, handleSupportClose } = require('./features/support');
 
 const client = new Client({ intents: [
   GatewayIntentBits.Guilds,
@@ -47,7 +48,7 @@ const instaWebhookBlock = new Map();
 
 // Configuração global
 async function getGlobalConfig(prisma) {
-  const cfg = await prisma.globalConfig.findFirst({ include: { ticketPingRolesGlobal: true } });
+  const cfg = await prisma.globalConfig.findFirst({ include: { ticketPingRolesGlobal: true, supportRolesGlobal: true } });
   return cfg || null;
 }
 async function ensureGlobalConfig(prisma) {
@@ -244,6 +245,17 @@ client.on('interactionCreate', async (interaction) => {
             new UserSelectMenuBuilder().setCustomId('menu:mute:bot:set').setPlaceholder('Selecione o bot responsável').setMinValues(1).setMaxValues(1)
           );
           await interaction.update({ embeds: [embed], components: [rowTop, row1, row2, row3] });
+        } else if (choice === 'support') {
+          const cfg = await getGlobalConfig(prisma);
+          const embed = buildSupportConfigEmbed(cfg);
+          const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('menu:back').setLabel('Voltar').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('menu:support:channel').setLabel('Canal Suporte').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('menu:support:roles').setLabel('Cargos Suporte').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('menu:support:log').setLabel('Canal Log Suporte').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('menu:support:panel').setLabel('Enviar/Atualizar').setStyle(ButtonStyle.Success)
+          );
+          await interaction.update({ embeds: [embed], components: [row] });
         }
       } else if (customId.startsWith('menu:insta:set:')) {
         // Salvar canal de boys/girls
@@ -267,11 +279,11 @@ client.on('interactionCreate', async (interaction) => {
         }
         const cfg = await ensureGlobalConfig(prisma);
         await prisma.ticketPingRoleGlobal.deleteMany({ where: { globalConfigId: cfg.id } });
-        const roleIds = interaction.values || [];
-        if (roleIds.length) {
-          await prisma.ticketPingRoleGlobal.createMany({ data: roleIds.map(roleId => ({ globalConfigId: cfg.id, roleId })), skipDuplicates: true });
+        const uniqueRoleIds = [...new Set(interaction.values || [])];
+        if (uniqueRoleIds.length) {
+          await prisma.ticketPingRoleGlobal.createMany({ data: uniqueRoleIds.map(roleId => ({ globalConfigId: cfg.id, roleId })) });
         }
-        await interaction.update({ content: `Cargos notificados atualizados: ${roleIds.map(id => `<@&${id}>`).join(', ') || 'nenhum'}`, embeds: [], components: [] });
+        await interaction.update({ content: `Cargos notificados atualizados: ${uniqueRoleIds.map(id => `<@&${id}>`).join(', ') || 'nenhum'}`, embeds: [], components: [] });
       } else if (customId === 'menu:insta:photos:set') {
         // Salvar canal de fotos de verificação
         const prisma = getPrisma();
@@ -322,9 +334,9 @@ client.on('interactionCreate', async (interaction) => {
         }
         const cfg = await ensureGlobalConfig(prisma);
         await prisma.ticketPingRoleGlobal.deleteMany({ where: { globalConfigId: cfg.id } });
-        const roleIds = interaction.values || [];
-        if (roleIds.length) {
-          await prisma.ticketPingRoleGlobal.createMany({ data: roleIds.map(roleId => ({ globalConfigId: cfg.id, roleId })), skipDuplicates: true });
+        const uniqueRoleIds = [...new Set(interaction.values || [])];
+        if (uniqueRoleIds.length) {
+          await prisma.ticketPingRoleGlobal.createMany({ data: uniqueRoleIds.map(roleId => ({ globalConfigId: cfg.id, roleId })) });
           }
           const freshCfg = await getGlobalConfig(prisma);
           const refreshed = buildInstaEmbed(freshCfg);
@@ -487,6 +499,48 @@ client.on('interactionCreate', async (interaction) => {
           } catch {}
         }
         await interaction.update({ content: `Verificação cancelada para <@${userId}>. Removido do banco e do cargo verificado (todos servidores permitidos).`, embeds: [], components: [] });
+      } else if (customId === 'menu:support:channel:set') {
+        const prisma = getPrisma();
+        if (!POSSE_USER_ID || POSSE_USER_ID !== interaction.user.id) {
+          return interaction.reply({ content: 'Apenas o usuário posse pode usar este comando.', ephemeral: true });
+        }
+        const channelId = interaction.values?.[0];
+        if (!channelId) {
+          return interaction.reply({ content: 'Seleção inválida.', ephemeral: true });
+        }
+        const cfg = await ensureGlobalConfig(prisma);
+        await prisma.globalConfig.update({ where: { id: cfg.id }, data: { supportPanelChannelId: channelId } });
+        const embed = new EmbedBuilder().setTitle('Canal de suporte atualizado').setDescription(`Novo canal configurado: <#${channelId}>`).setColor(0x2c2f33);
+        await interaction.update({ embeds: [embed], components: [] });
+      } else if (customId === 'menu:support:log:set') {
+        const prisma = getPrisma();
+        if (!POSSE_USER_ID || POSSE_USER_ID !== interaction.user.id) {
+          return interaction.reply({ content: 'Apenas o usuário posse pode usar este comando.', ephemeral: true });
+        }
+        const channelId = interaction.values?.[0];
+        if (!channelId) {
+          return interaction.reply({ content: 'Seleção inválida.', ephemeral: true });
+        }
+        const cfg = await ensureGlobalConfig(prisma);
+        await prisma.globalConfig.update({ where: { id: cfg.id }, data: { supportLogChannelId: channelId } });
+        const embed = new EmbedBuilder().setTitle('Canal de log atualizado').setDescription(`Logs enviados para: <#${channelId}>`).setColor(0x2c2f33);
+        await interaction.update({ embeds: [embed], components: [] });
+      } else if (customId === 'menu:support:roles:set') {
+        const prisma = getPrisma();
+        if (!POSSE_USER_ID || POSSE_USER_ID !== interaction.user.id) {
+          return interaction.reply({ content: 'Apenas o usuário posse pode usar este comando.', ephemeral: true });
+        }
+        const roleIds = [...new Set(interaction.values || [])];
+        const cfg = await ensureGlobalConfig(prisma);
+        await prisma.supportRoleGlobal.deleteMany({ where: { globalConfigId: cfg.id } });
+        if (roleIds.length) {
+          await prisma.supportRoleGlobal.createMany({ data: roleIds.map(roleId => ({ globalConfigId: cfg.id, roleId })) });
+        }
+        const embed = new EmbedBuilder()
+          .setTitle('Cargos de suporte atualizados')
+          .setDescription(roleIds.length ? roleIds.map(id => `<@&${id}>`).join(', ') : 'Nenhum cargo configurado')
+          .setColor(0x2c2f33);
+        await interaction.update({ embeds: [embed], components: [] });
       }
     } else if (interaction.isButton()) {
       const customId = interaction.customId;
@@ -620,6 +674,14 @@ client.on('interactionCreate', async (interaction) => {
       } else if (customId === 'bulkrole_cancel') {
         await interaction.update({ components: [] }).catch(() => {});
         return interaction.followUp({ content: 'Operação cancelada.', ephemeral: true });
+      } else if (customId === 'support:open') {
+        await handleSupportOpen(interaction);
+      } else if (customId.startsWith('support:close:')) {
+        const threadId = customId.split(':')[2];
+        if (!threadId) {
+          return interaction.reply({ content: 'Ticket inválido.', ephemeral: true });
+        }
+        await handleSupportClose(interaction, threadId);
   } else if (customId === 'verify:open') {
         // Abrir tópico privado
   const cfg = await getGlobalConfig(prisma);
@@ -820,7 +882,8 @@ client.on('interactionCreate', async (interaction) => {
           const baseEmbed = new EmbedBuilder().setTitle('Menu de Configuração').setDescription('Selecione uma seção para configurar.').setColor(0x5865F2);
           const menu = new StringSelectMenuBuilder().setCustomId('menu:root').setPlaceholder('Escolha uma seção...').addOptions([
             { label: 'Configurar Insta', value: 'insta', description: 'Canais e opções do Instagram' },
-            { label: 'Configurar Mute', value: 'mute', description: 'Cargo mutado, canal de desbloqueio e bot responsável' }
+            { label: 'Configurar Mute', value: 'mute', description: 'Cargo mutado, canal de desbloqueio e bot responsável' },
+            { label: 'Configurar Suporte', value: 'support', description: 'Painel, cargos e logs do suporte' }
           ]);
           const row = new ActionRowBuilder().addComponents(menu);
           return interaction.update({ embeds: [baseEmbed], components: [row] });
@@ -908,6 +971,69 @@ client.on('interactionCreate', async (interaction) => {
               new UserSelectMenuBuilder().setCustomId('menu:mute:bot:set').setPlaceholder('Selecione o bot responsável').setMinValues(1).setMaxValues(1)
             );
             return interaction.reply({ embeds: [subEmbed], components: [row1, row2, row3], ephemeral: true });
+          }
+        } else if (area === 'support') {
+          const action = parts[2];
+          const cfg = await getGlobalConfig(prisma);
+          if (action === 'channel') {
+            const subEmbed = new EmbedBuilder()
+              .setTitle('Canal de Suporte')
+              .setDescription(`Escolha o canal onde o painel ficará disponível.\nAtual: ${cfg?.supportPanelChannelId ? `<#${cfg.supportPanelChannelId}>` : 'não definido'}`)
+              .setColor(0x2c2f33);
+            const channelSelect = new ChannelSelectMenuBuilder()
+              .setCustomId('menu:support:channel:set')
+              .setPlaceholder('Selecione um canal de texto')
+              .setMinValues(1)
+              .setMaxValues(1)
+              .addChannelTypes(ChannelType.GuildText);
+            if (cfg?.supportPanelChannelId && typeof channelSelect.setDefaultChannels === 'function') {
+              channelSelect.setDefaultChannels(cfg.supportPanelChannelId);
+            }
+            const row = new ActionRowBuilder().addComponents(channelSelect);
+            return interaction.reply({ embeds: [subEmbed], components: [row], ephemeral: true });
+          } else if (action === 'roles') {
+            const selectedRoles = cfg?.supportRolesGlobal?.map(r => `<@&${r.roleId}>`).join(', ') || 'nenhum configurado';
+            const subEmbed = new EmbedBuilder()
+              .setTitle('Cargos de Suporte')
+              .setDescription(`Selecione quais cargos poderão encerrar atendimentos.\nAtuais: ${selectedRoles}`)
+              .setColor(0x2c2f33);
+            const roleSelect = new RoleSelectMenuBuilder()
+              .setCustomId('menu:support:roles:set')
+              .setPlaceholder('Selecione cargos de suporte')
+              .setMinValues(0)
+              .setMaxValues(10);
+            if (cfg?.supportRolesGlobal?.length && typeof roleSelect.setDefaultRoles === 'function') {
+              roleSelect.setDefaultRoles(...cfg.supportRolesGlobal.map(r => r.roleId));
+            }
+            const row = new ActionRowBuilder().addComponents(roleSelect);
+            return interaction.reply({ embeds: [subEmbed], components: [row], ephemeral: true });
+          } else if (action === 'log') {
+            const subEmbed = new EmbedBuilder()
+              .setTitle('Canal de Log do Suporte')
+              .setDescription(`Selecione o canal onde as transcrições serão enviadas.\nAtual: ${cfg?.supportLogChannelId ? `<#${cfg.supportLogChannelId}>` : 'não definido'}`)
+              .setColor(0x2c2f33);
+            const channelSelect = new ChannelSelectMenuBuilder()
+              .setCustomId('menu:support:log:set')
+              .setPlaceholder('Selecione um canal de texto para logs')
+              .setMinValues(1)
+              .setMaxValues(1)
+              .addChannelTypes(ChannelType.GuildText);
+            if (cfg?.supportLogChannelId && typeof channelSelect.setDefaultChannels === 'function') {
+              channelSelect.setDefaultChannels(cfg.supportLogChannelId);
+            }
+            const row = new ActionRowBuilder().addComponents(channelSelect);
+            return interaction.reply({ embeds: [subEmbed], components: [row], ephemeral: true });
+          } else if (action === 'panel') {
+            if (!cfg?.supportPanelChannelId) {
+              return interaction.reply({ content: 'Antes, você precisa configurar o canal de suporte.', ephemeral: true });
+            }
+            const panelChannel = await interaction.client.channels.fetch(cfg.supportPanelChannelId).catch(() => null);
+            if (!panelChannel || !panelChannel.isTextBased()) {
+              return interaction.reply({ content: 'Não foi possível acessar o canal de suporte configurado.', ephemeral: true });
+            }
+            const payload = getSupportPanelPayload();
+            await panelChannel.send(payload);
+            return interaction.reply({ content: `Painel enviado/atualizado em <#${panelChannel.id}>.`, ephemeral: true });
           }
         }
       } else if (customId.startsWith('insta:')) {

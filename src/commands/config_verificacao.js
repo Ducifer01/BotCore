@@ -51,8 +51,11 @@ module.exports = {
     // Atualiza lista de cargos a mencionar (substitui os passados, mantém os demais)
     if (roles.length) {
       // Remover duplicatas que já existem
-      const toAdd = roles.map(r => r.id).filter(id => !cfg.ticketPingRoles.some(pr => pr.roleId === id));
-      await prisma.ticketPingRole.createMany({ data: toAdd.map(roleId => ({ guildConfigId: cfg.id, roleId })), skipDuplicates: true });
+      const candidates = [...new Set(roles.map(r => r.id))];
+      const toAdd = candidates.filter(id => !cfg.ticketPingRoles.some(pr => pr.roleId === id));
+      if (toAdd.length) {
+        await prisma.ticketPingRole.createMany({ data: toAdd.map(roleId => ({ guildConfigId: cfg.id, roleId })) });
+      }
     }
 
     const parts = [];

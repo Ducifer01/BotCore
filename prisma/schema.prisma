@@ -23,6 +23,10 @@ model GlobalConfig {
   muteBotId            String?  // ID do bot que é o único autorizado a silenciar/desmutar
   muteRoleId           String?  // Cargo aplicado a usuários silenciados pelo bot especificado
   muteUnlockChannelId  String?  // Canal de voz: entrando aqui remove mute se NÃO foi aplicado pelo bot especificado
+  // Suporte (global)
+  supportPanelChannelId String?
+  supportLogChannelId   String?
+  supportRolesGlobal    SupportRoleGlobal[]
   // Relacionamentos globais
   ticketPingRolesGlobal TicketPingRoleGlobal[]
   createdAt            DateTime @default(now())
@@ -36,6 +40,30 @@ model TicketPingRoleGlobal {
   config          GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
 
   @@unique([globalConfigId, roleId])
+}
+
+model SupportRoleGlobal {
+  id             Int  @id @default(autoincrement())
+  globalConfigId Int
+  roleId         String
+  config         GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([globalConfigId, roleId])
+}
+
+model SupportTicket {
+  id               Int      @id @default(autoincrement())
+  threadId         String   @unique
+  channelId        String
+  guildId          String
+  openerId         String
+  openerTag        String?
+  closedBy         String?
+  closedAt         DateTime?
+  transcriptUrl    String?
+  logMessageId     String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 }
 
 model VerifiedUserGlobal {

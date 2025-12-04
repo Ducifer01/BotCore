@@ -64,6 +64,17 @@ Fluxo:
 - Em "Perfeito": o bot aplica o cargo de verificado, registra no banco e envia um resumo no tópico (menções, IDs e a imagem anexada).
 - Se o cargo de verificado for adicionado manualmente em alguém não registrado, o bot remove automaticamente.
 
+### Sistema de suporte
+- Acesse `/menu` e escolha **Configurar Suporte** para definir:
+	- **Canal Suporte**: onde o painel será publicado; é ali que os tópicos privados serão criados.
+	- **Cargos Suporte**: quem pode encerrar atendimentos.
+	- **Canal Log Suporte**: destino das transcrições e embeds de auditoria.
+- Após configurar, use o botão **Enviar/Atualizar** para publicar o painel com embed “Insônia - Suporte” e o botão cinza “Abrir Ticket”.
+- Usuários só conseguem ter 1 ticket aberto; ao clicar, o bot cria um tópico privado e menciona quem abriu + cargos de suporte.
+- Dentro do tópico há um embed “Insônia Suporte” e o botão **Encerrar atendimento** (somente cargos de suporte).
+- Ao encerrar, o bot envia mensagem ephemeral “Encerrando Ticket”, gera uma transcrição HTML com `discord-html-transcripts`, publica no canal de log e remove o tópico.
+- O embed no log é vermelho, com título “:Planilha: | Ticket suporte”, lista quem abriu/fechou e traz o horário nativo do Discord no rodapé.
+
 ### Insta boys/girls
 - `/config_insta [boys:<canal>] [girls:<canal>]` — define os canais de insta.
 - `/reset_insta` — confirma e, para cada canal configurado, anuncia o post com mais curtidas como "Ganhador da semana" e limpa os demais posts (preserva anúncios de ganhadores anteriores).
