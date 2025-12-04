@@ -100,7 +100,6 @@ async function handleSupportOpen(interaction) {
     invitable: false,
     reason: 'Ticket de suporte aberto pelo painel',
   });
-  await thread.members.add(interaction.user.id).catch(() => {});
 
   const supportRoleIds = extractSupportRoleIds(cfg);
   const mentions = [...supportRoleIds.map(id => `<@&${id}>`), `<@${interaction.user.id}>`].filter(Boolean).join(' ') || undefined;

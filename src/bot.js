@@ -38,6 +38,16 @@ const verifyThreads = new Map();
 // Map<threadId:userId, { buffer: Buffer, name: string }>
 const pendingVerifyImage = new Map();
 
+function buildVerifyThreadName(user) {
+  const safeUsername = user.username.replace(/[^\w\- ]/g, '').trim() || 'usuario';
+  return `verif-${user.id}-${safeUsername}`.slice(0, 90);
+}
+
+function threadBelongsToUser(thread, userId) {
+  if (!thread?.name) return false;
+  return thread.name.startsWith(`verif-${userId}`);
+}
+
 // Cache de webhooks por canal para insta
 // Map<channelId, { id, token }>
 const webhookCache = new Map();
@@ -694,26 +704,21 @@ client.on('interactionCreate', async (interaction) => {
           const active = await channel.threads.fetchActive();
           let existing = null;
           for (const [, th] of active.threads) {
-            if (verifyThreads.get(th.id)?.targetUserId === interaction.user.id) { existing = th; break; }
-          }
-          if (!existing) {
-            for (const [, th] of active.threads) {
-              const isMember = await th.members.fetch(interaction.user.id).then(() => true).catch(() => false);
-              if (isMember) { existing = th; break; }
-            }
+            const tracked = verifyThreads.get(th.id)?.targetUserId;
+            if (tracked === interaction.user.id || threadBelongsToUser(th, interaction.user.id)) { existing = th; break; }
           }
           if (existing) {
             return interaction.reply({ content: `Você já possui um ticket aberto: <#${existing.id}>`, ephemeral: true });
           }
         } catch {}
+        const verifyThreadName = buildVerifyThreadName(interaction.user);
         const thread = await channel.threads.create({
-          name: `${interaction.user.username}`.slice(0, 90),
+          name: verifyThreadName,
           autoArchiveDuration: 1440,
           type: ChannelType.PrivateThread,
           invitable: false,
         });
         // adiciona autor ao tópico
-        await thread.members.add(interaction.user.id).catch(() => {});
         verifyThreads.set(thread.id, { targetUserId: interaction.user.id });
   // lista de cargos para ping (global)
   const mentionRoles = cfg?.ticketPingRolesGlobal?.map(r => `<@&${r.roleId}>`) || [];
