@@ -29,6 +29,8 @@ model GlobalConfig {
   supportRolesGlobal    SupportRoleGlobal[]
   // Relacionamentos globais
   ticketPingRolesGlobal TicketPingRoleGlobal[]
+  // AutoMod
+  autoModConfig        AutoModConfig?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 }
@@ -49,6 +51,28 @@ model SupportRoleGlobal {
   config         GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
 
   @@unique([globalConfigId, roleId])
+}
+
+model AutoModConfig {
+  id                        Int                  @id @default(autoincrement())
+  globalConfigId            Int                  @unique
+  punishmentType            String               @default("DELETE")
+  punishmentDurationSeconds Int?
+  reason                    String               @default("Palavra Proibida")
+  config                    GlobalConfig         @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
+  blockedWords              AutoModBlockedWord[]
+  createdAt                 DateTime             @default(now())
+  updatedAt                 DateTime             @updatedAt
+}
+
+model AutoModBlockedWord {
+  id              Int           @id @default(autoincrement())
+  autoModConfigId Int
+  word            String
+  autoModConfig   AutoModConfig @relation(fields: [autoModConfigId], references: [id], onDelete: Cascade)
+  createdAt       DateTime      @default(now())
+
+  @@unique([autoModConfigId, word])
 }
 
 model SupportTicket {
@@ -263,3 +287,4 @@ model InstaWinner {
 
   guild Guild @relation(fields: [guildId], references: [id], onDelete: Cascade)
 }
+

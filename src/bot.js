@@ -15,6 +15,7 @@ const moveFeature = require('./features/moveSome');
 const roleEditorFeature = require('./features/roleEditor');
 const bulkRoleFeature = require('./features/bulkRole');
 const syncFeature = require('./features/categorySync');
+const autoModFeature = require('./features/autoMod');
 const { ALLOWED_GUILD_IDS, isGuildAllowed } = require('./config');
 
 const client = new Client({ intents: [
@@ -45,6 +46,7 @@ const menuHandler = createMenuHandler({
   insta: { presentMenu: instaFeature.presentMenu },
   mute: { presentMenu: muteConfig.presentMenu },
   support: { presentMenu: supportConfig.presentMenu },
+  automod: { presentMenu: autoModFeature.presentMenu },
 });
 
 const interactionFeatures = [
@@ -57,10 +59,11 @@ const interactionFeatures = [
   roleEditorFeature,
   bulkRoleFeature,
   syncFeature,
+  autoModFeature,
   { handleInteraction: handleSupportInteraction },
 ];
 
-const messageFeatures = [roleEditorFeature, instaFeature];
+const messageFeatures = [autoModFeature, roleEditorFeature, instaFeature];
 const guildUpdateFeatures = [instaFeature];
 
 function buildHandlerContext() {

@@ -15,10 +15,11 @@ function buildRootSelect() {
       { label: 'Configurar Insta', value: 'insta', description: 'Canais e opções do Instagram' },
       { label: 'Configurar Mute', value: 'mute', description: 'Cargo mutado, canal de desbloqueio e bot responsável' },
       { label: 'Configurar Suporte', value: 'support', description: 'Painel, cargos e logs do suporte' },
+      { label: 'Configurar AutoMod', value: 'automod', description: 'Palavras bloqueadas e punições' },
     ]);
 }
 
-function createMenuHandler({ insta, mute, support }) {
+function createMenuHandler({ insta, mute, support, automod }) {
   async function handleInteraction(interaction, ctx) {
     if (interaction.isStringSelectMenu() && interaction.customId === 'menu:root') {
       return handleRootSelection(interaction, ctx);
@@ -44,6 +45,9 @@ function createMenuHandler({ insta, mute, support }) {
     }
     if (choice === 'support') {
       return support.presentMenu(interaction, ctx);
+    }
+    if (choice === 'automod') {
+      return automod.presentMenu(interaction, ctx);
     }
     return false;
   }

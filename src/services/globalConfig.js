@@ -5,6 +5,11 @@ async function getGlobalConfig(prisma = getPrisma()) {
     include: {
       ticketPingRolesGlobal: true,
       supportRolesGlobal: true,
+      autoModConfig: {
+        include: {
+          blockedWords: true,
+        },
+      },
     },
   });
   return cfg || null;

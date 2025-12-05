@@ -88,6 +88,13 @@ Uso:
 	- 📝 listar comentários (ephemeral, com paginação)
 	- 🗑️ excluir (apenas o autor)
 
+### AutoMod
+- Dentro do `/menu`, escolha **Configurar AutoMod** para editar palavras bloqueadas e o tipo de punição.
+- **Palavras Bloqueadas**: ao clicar em "Inserir palavras", um sub-embed orienta o envio de um arquivo `.txt` com termos separados por vírgula (ex.: `palavra1, palavra2`). Digitar **cancelar** aborta o processo. As palavras novas são adicionadas ao banco, ignorando duplicatas automaticamente.
+- **Tipo Punição**: escolha entre "Apagar" (remove somente a mensagem) ou "Castigar e apagar" (remove e aplica timeout). Ao habilitar castigo, use "Definir tempo" para escolher rapidamente 60s, 5m, 10m, 1h, 1d ou 1 semana.
+- O motivo aplicado em exclusões/timeouts é sempre **"Palavra Proibida"**.
+- Durante a operação em massa de cargos (`/add_cargo_all`), o painel indica claramente quais cargos são ignorados; já durante execuções do AutoMod, o bot informa no canal que removeu a mensagem e opcionalmente pune o autor.
+
 ## Notas
 - Ao iniciar, o bot tenta sincronizar os comandos na guild definida por `DEV_GUILD_ID`. Se não encontrar a guild e `SYNC_GLOBAL_FALLBACK=true`, faz fallback para sincronização global (pode levar até ~1h para aparecer).
 - Para registro imediato na guild, certifique-se de que o bot está presente na guild e foi convidado com os escopos `applications.commands` e `bot`.
