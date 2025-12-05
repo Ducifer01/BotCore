@@ -10,6 +10,8 @@ const {
   formatDuration,
 } = require('../lib/moderation');
 
+const MAX_TIMEOUT_SECONDS = 28 * 24 * 60 * 60;
+
 function ensureReason(reason) {
   return reason?.trim() || 'Não informado';
 }
@@ -109,6 +111,9 @@ async function runCastigo({ guild, moderatorMember, targetMember, reason, durati
   const seconds = parseDuration(durationInput);
   if (!seconds || seconds <= 0) {
     throw new Error('Tempo inválido. Use formatos como 30s, 5m, 1h, 1d.');
+  }
+  if (seconds > MAX_TIMEOUT_SECONDS) {
+    throw new Error('Tempo máximo permitido é 28 dias.');
   }
   const cleanReason = ensureReason(reason);
   const logEmbed = buildLogEmbed({

@@ -1,25 +1,22 @@
 const { runBan, runUnban, runCastigo, runRemoveCastigo, resolveTargetUser } = require('../actions/moderationActions');
+const { COMMAND_TYPES, ensureModerationConfig, memberHasPermission } = require('../lib/moderation');
 
 const PREFIX = '!';
 const TEMP_MESSAGE_TTL = 15000;
 const LOG_PREVIEW_TTL = 20000;
-
-const USAGE = {
-  ban: '!ban <menção/ID> [motivo]'
-    + '\nExemplo: !ban @Usuário quebrou regras',
-  unban: '!unban <ID> [motivo]'
-    + '\nExemplo: !unban 123456789 resolvido',
-  castigo: '!castigo <menção/ID> <tempo> [motivo]'
-    + '\nExemplo: !castigo @Usuário 1h spam no chat',
-  removercastigo: '!removercastigo <menção/ID> [motivo]'
-    + '\nExemplo: !removercastigo @Usuário colaboração restabelecida',
-};
 
 class CommandUsageError extends Error {
   constructor(message, usageKey) {
     super(message);
     this.name = 'CommandUsageError';
     this.usageKey = usageKey;
+  }
+}
+
+class PermissionError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'PermissionError';
   }
 }
 
@@ -34,25 +31,18 @@ async function deleteCommandMessage(message) {
   await message.delete().catch(() => {});
 }
 
-async function sendUnknownCommandFeedback(channel) {
-  if (!channel) return;
-  const list = Object.values(USAGE)
-    .map((usage) => usage.split('\n')[0])
-    .join('\n');
-  const content = `Comando prefixado inválido. Disponíveis:\n${list}`;
-  await sendTemporaryMessage(channel, { content });
-}
-
 async function handleCommandError(message, err, commandName) {
   console.warn('[moderation prefix]', commandName, err?.message || err);
   const channel = message.channel;
-  const usageKey = err instanceof CommandUsageError ? err.usageKey : null;
-  const usageText = usageKey ? USAGE[usageKey] : null;
-  const parts = [`⚠️ ${err?.message || 'Erro inesperado.'}`];
-  if (usageText) {
-    parts.push(usageText);
+  if (err instanceof PermissionError) {
+    await sendTemporaryMessage(channel, { content: err.message });
+    return;
   }
-  await sendTemporaryMessage(channel, { content: parts.join('\n') });
+  if (err instanceof CommandUsageError) {
+    await sendTemporaryMessage(channel, { content: err.message });
+    return;
+  }
+  await sendTemporaryMessage(channel, { content: err?.message || 'Erro inesperado.' });
 }
 
 async function sendSuccessFeedback(channel, _confirmationMessage, logEmbed) {
@@ -77,6 +67,42 @@ function cloneEmbedData(embed) {
     return embed.toJSON();
   }
   return embed;
+}
+
+async function assertCommandPermission(commandType, message, prisma, posseId) {
+  const cfg = await ensureModerationConfig(prisma);
+  const enabledField =
+    commandType === COMMAND_TYPES.BAN ? 'banEnabled' : 'castigoEnabled';
+  if (!cfg[enabledField]) {
+    throw new PermissionError('Este comando está desativado no momento.');
+  }
+  if (!memberHasPermission(message.member, cfg, commandType, posseId)) {
+    throw new PermissionError('Você não tem permissão para usar esse comando.');
+  }
+}
+
+function extractDurationAndReason(args) {
+  if (!Array.isArray(args) || !args.length) {
+    return { durationToken: null, reasonText: '' };
+  }
+  let durationIndex = -1;
+  for (let i = 0; i < args.length; i += 1) {
+    if (isDurationToken(args[i])) {
+      durationIndex = i;
+      break;
+    }
+  }
+  if (durationIndex === -1) {
+    return { durationToken: null, reasonText: args.join(' ').trim() };
+  }
+  const durationToken = args[durationIndex];
+  const reasonParts = args.filter((_, idx) => idx !== durationIndex);
+  return { durationToken, reasonText: reasonParts.join(' ').trim() };
+}
+
+function isDurationToken(token) {
+  if (!token) return false;
+  return /^\d+(s|m|h|d|w)$/i.test(String(token).trim());
 }
 
 async function sendTemporaryMessage(channel, payload, ttl = TEMP_MESSAGE_TTL) {
@@ -105,12 +131,12 @@ async function handleMessage(message, ctx) {
   const prisma = ctx.getPrisma();
   const posseId = String(process.env.POSSE_USER_ID || '').trim();
   const withoutPrefix = content.slice(PREFIX.length).trim();
+  if (!withoutPrefix) return false;
   const [commandNameRaw, ...rawArgs] = withoutPrefix.split(/\s+/);
   const commandName = (commandNameRaw || '').toLowerCase();
   const handler = COMMAND_HANDLERS[commandName];
   if (!handler) {
     await deleteCommandMessage(message);
-    await sendUnknownCommandFeedback(message.channel);
     return true;
   }
 
@@ -126,12 +152,13 @@ async function handleMessage(message, ctx) {
 }
 
 async function handlePrefixBan(message, args, prisma, posseId) {
+  await assertCommandPermission(COMMAND_TYPES.BAN, message, prisma, posseId);
   if (args.length < 1) {
-    throw new CommandUsageError('Informe o usuário a ser banido.', 'ban');
+    throw new CommandUsageError('Informe o usuário a ser banido. ex: !ban @usuario Quebrou regras.', 'ban');
   }
   const targetId = extractId(args.shift());
   if (!targetId) {
-    throw new CommandUsageError('ID ou menção inválida.', 'ban');
+    throw new CommandUsageError('Informe o usuário a ser banido. ex: !ban @usuario Quebrou regras.', 'ban');
   }
   const reason = args.join(' ');
   const targetUser = await resolveTargetUser(message.guild, targetId);
@@ -150,12 +177,13 @@ async function handlePrefixBan(message, args, prisma, posseId) {
 }
 
 async function handlePrefixUnban(message, args, prisma, posseId) {
+  await assertCommandPermission(COMMAND_TYPES.BAN, message, prisma, posseId);
   if (args.length < 1) {
-    throw new CommandUsageError('Informe o ID do usuário a ser desbanido.', 'unban');
+    throw new CommandUsageError('informe o id do usuario e o motivo. ex: !unban 123456789 Resolvido.', 'unban');
   }
   const targetId = extractId(args.shift());
   if (!targetId) {
-    throw new CommandUsageError('ID inválido.', 'unban');
+    throw new CommandUsageError('informe o id do usuario e o motivo. ex: !unban 123456789 Resolvido.', 'unban');
   }
   const reason = args.join(' ');
   const result = await runUnban({
@@ -170,18 +198,18 @@ async function handlePrefixUnban(message, args, prisma, posseId) {
 }
 
 async function handlePrefixCastigo(message, args, prisma, posseId) {
-  if (args.length < 2) {
-    throw new CommandUsageError('Informe o usuário e o tempo do castigo.', 'castigo');
+  await assertCommandPermission(COMMAND_TYPES.CASTIGO, message, prisma, posseId);
+  if (args.length < 1) {
+    throw new CommandUsageError('Informe o usuário e o tempo do castigo. !castigo @menção/id 1h Azaralhando servidor.', 'castigo');
   }
   const targetId = extractId(args.shift());
   if (!targetId) {
-    throw new CommandUsageError('ID ou menção inválida.', 'castigo');
+    throw new CommandUsageError('Informe o usuário e o tempo do castigo. !castigo @menção/id 1h Azaralhando servidor.', 'castigo');
   }
-  const duration = args.shift();
-  if (!duration) {
-    throw new CommandUsageError('Informe a duração (ex.: 30s, 5m, 1h).', 'castigo');
+  const { durationToken, reasonText } = extractDurationAndReason(args);
+  if (!durationToken) {
+    throw new CommandUsageError('Informe o usuário e o tempo do castigo. !castigo @menção/id 1h Azaralhando servidor.', 'castigo');
   }
-  const reason = args.join(' ');
   const member = await message.guild.members.fetch(targetId).catch(() => null);
   if (!member) {
     throw new Error('Usuário precisa estar no servidor.');
@@ -190,8 +218,8 @@ async function handlePrefixCastigo(message, args, prisma, posseId) {
     guild: message.guild,
     moderatorMember: message.member,
     targetMember: member,
-    reason,
-    durationInput: duration,
+    reason: reasonText,
+    durationInput: durationToken,
     prisma,
     posseId,
   });
@@ -199,12 +227,13 @@ async function handlePrefixCastigo(message, args, prisma, posseId) {
 }
 
 async function handlePrefixRemoveCastigo(message, args, prisma, posseId) {
+  await assertCommandPermission(COMMAND_TYPES.CASTIGO, message, prisma, posseId);
   if (args.length < 1) {
-    throw new CommandUsageError('Informe o usuário alvo.', 'removercastigo');
+    throw new CommandUsageError('Informe o id do usuário. ex: !removercastigo @usuario Resolvido.', 'removercastigo');
   }
   const targetId = extractId(args.shift());
   if (!targetId) {
-    throw new CommandUsageError('ID ou menção inválida.', 'removercastigo');
+    throw new CommandUsageError('Informe o id do usuário. ex: !removercastigo @usuario Resolvido.', 'removercastigo');
   }
   const reason = args.join(' ');
   const member = await message.guild.members.fetch(targetId).catch(() => null);
