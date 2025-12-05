@@ -93,9 +93,24 @@ function checkHierarchy(actorMember, targetMember, botMember) {
   return { ok: true };
 }
 
-function formatUserValue(user) {
-  const tag = user.tag || `${user.username}${user.discriminator ? `#${user.discriminator}` : ''}`;
-  return `${tag} | \n\`\`\`${user.id}\`\`\``;
+function formatUserValue(user, fallbackLabel = 'Desconhecido') {
+  if (!user) {
+    return `${fallbackLabel}\nID: \`N/A\``;
+  }
+  const tag = user.tag || `${user.username || fallbackLabel}${user.discriminator ? `#${user.discriminator}` : ''}`;
+  const mention = user.id ? `<@${user.id}>` : tag;
+  return [`${mention} (${tag})`, `ID: \`${user.id || 'N/A'}\``].join('\n');
+}
+
+function getAvatarUrl(user) {
+  if (!user) return null;
+  if (typeof user.displayAvatarURL === 'function') {
+    return user.displayAvatarURL({ size: 256, extension: 'png' });
+  }
+  if (user.avatar && user.id) {
+    return `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=256`;
+  }
+  return null;
 }
 
 function buildLogEmbed({ type, action, targetUser, moderatorUser, reason, guild, durationSeconds }) {
@@ -111,9 +126,13 @@ function buildLogEmbed({ type, action, targetUser, moderatorUser, reason, guild,
       embed.addFields({ name: 'Duração', value: formatDuration(durationSeconds), inline: true });
     }
   }
+  const thumbnailUrl = getAvatarUrl(targetUser);
+  if (thumbnailUrl) {
+    embed.setThumbnail(thumbnailUrl);
+  }
   embed.addFields(
     { name: 'Membro', value: formatUserValue(targetUser), inline: true },
-  { name: 'Moderador', value: `${moderatorUser ? `<@${moderatorUser.id}>` : 'Desconhecido'} | \n\`\`\`${moderatorUser?.id || 'N/A'}\`\`\``, inline: true },
+    { name: 'Moderador', value: formatUserValue(moderatorUser, 'Desconhecido'), inline: true },
     { name: 'Motivo', value: `\`\`\`${reason || 'Não informado'}\`\`\`` },
   );
   embed.setFooter({ text: guild.name });

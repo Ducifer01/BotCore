@@ -40,7 +40,7 @@ async function runBan({ guild, moderatorMember, targetUser, reason, prisma, poss
     throw new Error(hierarchy.message);
   }
   const cleanReason = ensureReason(reason);
-  const embed = buildLogEmbed({
+  const logEmbed = buildLogEmbed({
     type: COMMAND_TYPES.BAN,
     action: 'BAN',
     targetUser,
@@ -48,12 +48,17 @@ async function runBan({ guild, moderatorMember, targetUser, reason, prisma, poss
     reason: cleanReason,
     guild,
   });
-  await sendDmIfConfigured(targetUser, embed, cfg, COMMAND_TYPES.BAN);
+  await sendDmIfConfigured(targetUser, logEmbed, cfg, COMMAND_TYPES.BAN);
   await guild.members.ban(targetUser.id, { reason: cleanReason }).catch((err) => {
     throw new Error(`Falha ao banir: ${err?.message || err}`);
   });
-  await sendLogMessage(guild, cfg.banLogChannelId, embed);
-  return { message: `${targetUser.tag || targetUser.username} banido com sucesso.` };
+  const logSent = await sendLogMessage(guild, cfg.banLogChannelId, logEmbed);
+  return {
+    message: `${targetUser.tag || targetUser.username} banido com sucesso.`,
+    logEmbed,
+    logChannelId: cfg.banLogChannelId,
+    logSent,
+  };
 }
 
 async function runUnban({ guild, moderatorMember, targetUserId, reason, prisma, posseId }) {
@@ -69,7 +74,7 @@ async function runUnban({ guild, moderatorMember, targetUserId, reason, prisma, 
   await guild.bans.remove(targetUserId, cleanReason).catch((err) => {
     throw new Error(`Falha ao remover ban: ${err?.message || err}`);
   });
-  const embed = buildLogEmbed({
+  const logEmbed = buildLogEmbed({
     type: COMMAND_TYPES.BAN,
     action: 'UNBAN',
     targetUser,
@@ -77,8 +82,13 @@ async function runUnban({ guild, moderatorMember, targetUserId, reason, prisma, 
     reason: cleanReason,
     guild,
   });
-  await sendLogMessage(guild, cfg.banLogChannelId, embed);
-  return { message: `Ban de ${targetUserId} removido.` };
+  const logSent = await sendLogMessage(guild, cfg.banLogChannelId, logEmbed);
+  return {
+    message: `Ban de ${targetUserId} removido.`,
+    logEmbed,
+    logChannelId: cfg.banLogChannelId,
+    logSent,
+  };
 }
 
 async function runCastigo({ guild, moderatorMember, targetMember, reason, durationInput, prisma, posseId }) {
@@ -101,7 +111,7 @@ async function runCastigo({ guild, moderatorMember, targetMember, reason, durati
     throw new Error('Tempo inválido. Use formatos como 30s, 5m, 1h, 1d.');
   }
   const cleanReason = ensureReason(reason);
-  const embed = buildLogEmbed({
+  const logEmbed = buildLogEmbed({
     type: COMMAND_TYPES.CASTIGO,
     action: 'APPLY',
     targetUser: targetMember.user,
@@ -110,12 +120,17 @@ async function runCastigo({ guild, moderatorMember, targetMember, reason, durati
     guild,
     durationSeconds: seconds,
   });
-  await sendDmIfConfigured(targetMember.user, embed, cfg, COMMAND_TYPES.CASTIGO);
+  await sendDmIfConfigured(targetMember.user, logEmbed, cfg, COMMAND_TYPES.CASTIGO);
   await targetMember.timeout(seconds * 1000, cleanReason).catch((err) => {
     throw new Error(`Falha ao aplicar castigo: ${err?.message || err}`);
   });
-  await sendLogMessage(guild, cfg.castigoLogChannelId, embed);
-  return { message: `${targetMember.user.tag || targetMember.user.username} castigado por ${formatDuration(seconds)}.` };
+  const logSent = await sendLogMessage(guild, cfg.castigoLogChannelId, logEmbed);
+  return {
+    message: `${targetMember.user.tag || targetMember.user.username} castigado por ${formatDuration(seconds)}.`,
+    logEmbed,
+    logChannelId: cfg.castigoLogChannelId,
+    logSent,
+  };
 }
 
 async function runRemoveCastigo({ guild, moderatorMember, targetMember, reason, prisma, posseId }) {
@@ -137,7 +152,7 @@ async function runRemoveCastigo({ guild, moderatorMember, targetMember, reason, 
   await targetMember.timeout(null, cleanReason).catch((err) => {
     throw new Error(`Falha ao remover castigo: ${err?.message || err}`);
   });
-  const embed = buildLogEmbed({
+  const logEmbed = buildLogEmbed({
     type: COMMAND_TYPES.CASTIGO,
     action: 'REMOVE',
     targetUser: targetMember.user,
@@ -145,8 +160,13 @@ async function runRemoveCastigo({ guild, moderatorMember, targetMember, reason, 
     reason: cleanReason,
     guild,
   });
-  await sendLogMessage(guild, cfg.castigoLogChannelId, embed);
-  return { message: `Castigo removido de ${targetMember.user.tag || targetMember.user.username}.` };
+  const logSent = await sendLogMessage(guild, cfg.castigoLogChannelId, logEmbed);
+  return {
+    message: `Castigo removido de ${targetMember.user.tag || targetMember.user.username}.`,
+    logEmbed,
+    logChannelId: cfg.castigoLogChannelId,
+    logSent,
+  };
 }
 
 module.exports = {

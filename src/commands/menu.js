@@ -5,14 +5,7 @@ const { getPrisma } = require('../db');
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('menu')
-    .setDescription('Painel de configuração do bot (apenas usuário posse)')
-  .addStringOption(o => o.setName('escopo').setDescription('Opcional: ir direto para uma seção').addChoices(
-    { name: 'insta', value: 'insta' },
-    { name: 'mute', value: 'mute' },
-    { name: 'suporte', value: 'support' },
-    { name: 'automod', value: 'automod' },
-    { name: 'moderação', value: 'moderation' }
-  )),
+    .setDescription('Painel de configuração do bot (apenas usuário posse)'),
   async execute(interaction) {
     await ensureGuild(interaction.guild);
     const POSSE_USER_ID = String(process.env.POSSE_USER_ID || '').trim();
