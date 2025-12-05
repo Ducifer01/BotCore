@@ -11,15 +11,15 @@ module.exports = {
       .setRequired(true))
     .addRoleOption(opt => opt
       .setName('excluir_cargo_1')
-      .setDescription('Excluir membros que possuem este cargo')
+      .setDescription('Ignorar membros que possuem este cargo (não receberão o novo)')
       .setRequired(false))
     .addRoleOption(opt => opt
       .setName('excluir_cargo_2')
-      .setDescription('Excluir membros que possuem este cargo')
+      .setDescription('Ignorar membros que possuem este cargo (não receberão o novo)')
       .setRequired(false))
     .addRoleOption(opt => opt
       .setName('excluir_cargo_3')
-      .setDescription('Excluir membros que possuem este cargo')
+      .setDescription('Ignorar membros que possuem este cargo (não receberão o novo)')
       .setRequired(false)),
   async execute(interaction) {
     if (!(await checkAccess(interaction, 'add_cargo_all'))) {
@@ -32,12 +32,19 @@ module.exports = {
       interaction.options.getRole('excluir_cargo_3'),
     ].filter(Boolean).map(r => r.id);
 
+    const exclusionInfo = exclude.length
+      ? exclude.map(id => `<@&${id}>`).join(', ')
+      : 'Nenhum cargo será usado como exclusão (todos receberão o novo cargo).';
+
     const embed = new EmbedBuilder()
       .setTitle('Adicionar cargo em massa')
-      .setDescription(`Cargo alvo: <@&${role.id}>
-Exclusões: ${exclude.length ? exclude.map(id => `<@&${id}>`).join(', ') : 'nenhuma'}
-
-Tem certeza que deseja adicionar este cargo a todos os membros?`)
+      .setDescription([
+        `Cargo alvo: <@&${role.id}>`,
+        `Ignorar (não receberão): ${exclusionInfo}`,
+        '',
+        '⚠️ **Atenção:** os membros que possuírem qualquer cargo listado em "Ignorar" serão pulados e não receberão o cargo selecionado.',
+        'Tem certeza que deseja adicionar este cargo a todos os demais membros?',
+      ].join('\n'))
       .setColor(0x2ecc71);
 
     const row = new ActionRowBuilder().addComponents(

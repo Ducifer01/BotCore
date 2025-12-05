@@ -1,3 +1,5 @@
+const { EmbedBuilder } = require('discord.js');
+
 async function handleInteraction(interaction) {
   if (!interaction.isButton()) return false;
   const customId = interaction.customId;
@@ -36,6 +38,17 @@ async function handleConfirm(interaction) {
     return;
   }
   const members = await guild.members.fetch();
+  let progressMessage = null;
+  const loadingEmbed = new EmbedBuilder()
+    .setTitle('Aplicando cargo em massa')
+    .setDescription([
+      `Estou ${action === 'add' ? 'adicionando' : 'removendo'} o cargo <@&${roleId}> em todos os membros permitidos.`,
+      'Isso pode levar um tempo, aguarde enquanto concluo a operação (carregamento infinito ♾️).',
+    ].join('\n'))
+    .setColor(0xFEE75C);
+  try {
+    progressMessage = await interaction.followUp({ embeds: [loadingEmbed], ephemeral: true });
+  } catch {}
   let processed = 0;
   let changed = 0;
   let skipped = 0;
@@ -67,7 +80,27 @@ async function handleConfirm(interaction) {
       failed++;
     }
   }
-  await interaction.followUp({ content: `Concluído: ${action === 'add' ? 'adicionados' : 'removidos'}: ${changed} | pulados: ${skipped} | falhas: ${failed} | total: ${processed}`, ephemeral: true });
+  const finalEmbed = new EmbedBuilder()
+    .setTitle('Operação de cargos concluída')
+    .setDescription(action === 'add'
+      ? 'Processo finalizado. Veja abaixo o resultado da adição em massa:'
+      : 'Processo finalizado. Veja abaixo o resultado da remoção em massa:')
+    .addFields(
+      { name: 'Cargo alvo', value: `<@&${roleId}>`, inline: true },
+      { name: 'Ignorados (não alterados)', value: excludeIds.length ? excludeIds.map((id) => `<@&${id}>`).join(', ') : 'Nenhum', inline: true },
+      { name: 'Processados', value: String(processed), inline: true },
+      { name: action === 'add' ? 'Adicionados' : 'Removidos', value: String(changed), inline: true },
+      { name: 'Ignorados (já tinham ou excluídos)', value: String(skipped), inline: true },
+      { name: 'Falhas', value: String(failed), inline: true }
+    )
+    .setColor(0x57F287)
+    .setTimestamp();
+
+  if (progressMessage?.editable) {
+    await progressMessage.edit({ embeds: [finalEmbed] }).catch(() => {});
+  } else {
+    await interaction.followUp({ embeds: [finalEmbed], ephemeral: true }).catch(() => {});
+  }
 }
 
 module.exports = { handleInteraction };
