@@ -10,7 +10,8 @@ module.exports = {
     { name: 'insta', value: 'insta' },
     { name: 'mute', value: 'mute' },
     { name: 'suporte', value: 'support' },
-    { name: 'automod', value: 'automod' }
+    { name: 'automod', value: 'automod' },
+    { name: 'moderação', value: 'moderation' }
   )),
   async execute(interaction) {
     await ensureGuild(interaction.guild);
@@ -36,7 +37,8 @@ module.exports = {
         { label: 'Configurar Insta', value: 'insta', description: 'Canais e opções do Instagram' },
         { label: 'Configurar Mute', value: 'mute', description: 'Cargo mutado, canal de desbloqueio e bot responsável' },
         { label: 'Configurar Suporte', value: 'support', description: 'Painel, cargos e logs do suporte' },
-        { label: 'Configurar AutoMod', value: 'automod', description: 'Palavras bloqueadas e punições automáticas' }
+        { label: 'Configurar AutoMod', value: 'automod', description: 'Palavras bloqueadas e punições automáticas' },
+        { label: 'Configurar Moderação', value: 'moderation', description: 'Banimentos, castigos e permissões' }
       ]);
     const row = new ActionRowBuilder().addComponents(menu);
     await interaction.editReply({ embeds: [baseEmbed], components: [row] });

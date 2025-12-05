@@ -31,6 +31,8 @@ model GlobalConfig {
   ticketPingRolesGlobal TicketPingRoleGlobal[]
   // AutoMod
   autoModConfig        AutoModConfig?
+  // Moderação
+  moderationConfig     ModerationConfig?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 }
@@ -73,6 +75,35 @@ model AutoModBlockedWord {
   createdAt       DateTime      @default(now())
 
   @@unique([autoModConfigId, word])
+}
+
+model ModerationConfig {
+  id                   Int                     @id @default(autoincrement())
+  globalConfigId       Int                     @unique
+  banEnabled           Boolean                 @default(false)
+  banLogChannelId      String?
+  banDmEnabled         Boolean                 @default(false)
+  banDmMessage         String?
+  banDmContactId       String?
+  castigoEnabled       Boolean                 @default(false)
+  castigoLogChannelId  String?
+  castigoDmEnabled     Boolean                 @default(false)
+  castigoDmMessage     String?
+  castigoDmContactId   String?
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
+  config               GlobalConfig            @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
+  permissions          ModerationPermission[]
+}
+
+model ModerationPermission {
+  id                  Int               @id @default(autoincrement())
+  moderationConfigId  Int
+  commandType         String
+  roleId              String
+  config              ModerationConfig  @relation(fields: [moderationConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([moderationConfigId, commandType, roleId])
 }
 
 model SupportTicket {

@@ -95,8 +95,22 @@ Uso:
 - O motivo aplicado em exclusões/timeouts é sempre **"Palavra Proibida"**.
 - Durante a operação em massa de cargos (`/add_cargo_all`), o painel indica claramente quais cargos são ignorados; já durante execuções do AutoMod, o bot informa no canal que removeu a mensagem e opcionalmente pune o autor.
 
+### Moderação (Ban/Castigo)
+- No `/menu`, selecione **Configurar Moderação** para abrir o painel principal e siga para **Config Ban** ou **Config Castigo**.
+  - Cada painel possui botões para **Ativar/Desativar** o comando, **Config Log** (select com canais já pré-selecionados se houver valor salvo) e **Permissões** (select com cargos da guild marcados conforme banco).
+  - **Config DM** permite alternar o envio de DM antes da punição, definir contato (ID/menção) e editar a mensagem enviada; o texto é armazenado no banco e exibido em tempo real.
+  - Logs ficam vinculados a canais de texto e podem ser limpos escolhendo "Desativar logs".
+- Comandos disponíveis (slash e prefixo):
+  - `/ban` / `!ban <id/menção> <motivo>` — envia DM primeiro (se habilitado), registra log vermelho e bane o usuário.
+  - `/unban` / `!unban <id> <motivo>` — remove o ban e registra log verde.
+  - `/castigo` / `!castigo <id/menção> <motivo> <tempo>` — aplica timeout (tempo no formato `30s`, `5m`, `2h`, `1d`, `1w`).
+  - `/removercastigo` / `!removercastigo <id/menção> [motivo]` — remove o timeout.
+- Hierarquia sempre é respeitada: nem o executor nem o bot podem agir em alguém com cargo igual/maior.
+- Os logs seguem o layout solicitado: título específico (Banimento/Banimento removido/Castigo aplicado/Castigo removido), campos "Membro" e "Moderador" no formato `nome | 
+
 ## Notas
 - Ao iniciar, o bot tenta sincronizar os comandos na guild definida por `DEV_GUILD_ID`. Se não encontrar a guild e `SYNC_GLOBAL_FALLBACK=true`, faz fallback para sincronização global (pode levar até ~1h para aparecer).
+- As DMs usam exatamente o embed do log + a mensagem configurada (e, opcionalmente, uma menção ao contato), e só acontecem antes da ação para garantir entrega.
 - Para registro imediato na guild, certifique-se de que o bot está presente na guild e foi convidado com os escopos `applications.commands` e `bot`.
 - O script `npm run register:dev` continua disponível como alternativa manual.
 - Para restringir o bot a funcionar apenas em alguns servidores (mesmo dono), defina `ALLOWED_GUILD_IDS` no `.env` com os IDs separados por vírgula. Qualquer interação fora dessa lista será negada pelo bot.

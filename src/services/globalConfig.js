@@ -10,6 +10,11 @@ async function getGlobalConfig(prisma = getPrisma()) {
           blockedWords: true,
         },
       },
+      moderationConfig: {
+        include: {
+          permissions: true,
+        },
+      },
     },
   });
   return cfg || null;
