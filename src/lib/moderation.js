@@ -122,19 +122,20 @@ function buildLogEmbed({ type, action, targetUser, moderatorUser, reason, guild,
     const isRemoval = action === 'REMOVE';
     embed.setTitle(isRemoval ? CASTIGO_TITLES.REMOVE : CASTIGO_TITLES.APPLY);
     embed.setColor(isRemoval ? COLORS.CASTIGO_REMOVE : COLORS.CASTIGO);
-    if (!isRemoval && durationSeconds) {
-      embed.addFields({ name: 'Duração', value: formatDuration(durationSeconds), inline: true });
-    }
   }
   const thumbnailUrl = getAvatarUrl(targetUser);
   if (thumbnailUrl) {
     embed.setThumbnail(thumbnailUrl);
   }
-  embed.addFields(
+  const fields = [
     { name: 'Membro', value: formatUserValue(targetUser), inline: true },
     { name: 'Moderador', value: formatUserValue(moderatorUser, 'Desconhecido'), inline: true },
-    { name: 'Motivo', value: `\`\`\`${reason || 'Não informado'}\`\`\`` },
-  );
+  ];
+  if (type === COMMAND_TYPES.CASTIGO && action !== 'REMOVE' && durationSeconds) {
+    fields.push({ name: 'Duração', value: formatDuration(durationSeconds), inline: true });
+  }
+  fields.push({ name: 'Motivo', value: `\`\`\`${reason || 'Não informado'}\`\`\`` });
+  embed.addFields(fields);
   embed.setFooter({ text: guild.name });
   embed.setTimestamp(new Date());
   return embed;

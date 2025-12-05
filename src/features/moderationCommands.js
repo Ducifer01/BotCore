@@ -55,8 +55,7 @@ async function handleCommandError(message, err, commandName) {
   await sendTemporaryMessage(channel, { content: parts.join('\n') });
 }
 
-async function sendSuccessFeedback(channel, confirmationMessage, logEmbed) {
-  await sendTemporaryMessage(channel, { content: `✅ ${confirmationMessage}` });
+async function sendSuccessFeedback(channel, _confirmationMessage, logEmbed) {
   await sendLogPreview(channel, logEmbed);
 }
 
@@ -66,7 +65,6 @@ async function sendLogPreview(channel, logEmbed) {
   await sendTemporaryMessage(
     channel,
     {
-      content: 'Log (visualização temporária – será removido em instantes):',
       embeds: [embedData],
     },
     LOG_PREVIEW_TTL,
