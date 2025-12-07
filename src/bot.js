@@ -10,6 +10,7 @@ const { createMenuHandler } = require('./features/menu');
 const instaFeature = require('./features/insta');
 const muteConfig = require('./features/muteConfig');
 const supportConfig = require('./features/supportConfig');
+const vipConfig = require('./features/vipConfig');
 const verifyFeature = require('./features/verify');
 const moveFeature = require('./features/moveSome');
 const roleEditorFeature = require('./features/roleEditor');
@@ -19,6 +20,7 @@ const autoModFeature = require('./features/autoMod');
 const moderationConfig = require('./features/moderationConfig');
 const moderationCommands = require('./features/moderationCommands');
 const muteCommands = require('./features/muteCommands');
+const vipSystem = require('./features/vipSystem');
 const { ALLOWED_GUILD_IDS, isGuildAllowed } = require('./config');
 
 const client = new Client({ intents: [
@@ -45,18 +47,27 @@ try {
   console.warn('[init] Mute feature não carregada:', e?.message || e);
 }
 
+try {
+  vipSystem.registerVipFeature(client);
+} catch (e) {
+  console.warn('[init] VIP feature não carregada:', e?.message || e);
+}
+
 const menuHandler = createMenuHandler({
   insta: { presentMenu: instaFeature.presentMenu },
   mute: { presentMenu: muteConfig.presentMenu },
   support: { presentMenu: supportConfig.presentMenu },
   automod: { presentMenu: autoModFeature.presentMenu },
   moderation: { presentMenu: moderationConfig.presentMenu },
+  vip: { presentMenu: vipConfig.presentMenu },
 });
 
 const interactionFeatures = [
   menuHandler,
   muteConfig,
   supportConfig,
+  vipConfig,
+  vipSystem,
   instaFeature,
   verifyFeature,
   moveFeature,
