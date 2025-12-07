@@ -78,9 +78,13 @@ function buildMuteLogEmbed({ scope, action, targetUser, moderatorUser, reason, d
     { name: 'Moderador', value: formatUserField(moderatorUser, 'Sistema'), inline: true },
   ];
   if (applying && durationSeconds) {
-    fields.push({ name: 'Duração', value: formatDuration(durationSeconds), inline: true });
+    const expirationValue = buildDiscordTimestampValue(durationSeconds);
+    if (expirationValue) {
+      fields.push({ name: 'Tempo', value: formatDuration(durationSeconds), inline: true });
+      fields.push({ name: 'Expira em', value: expirationValue, inline: true });
+    }
   }
-  fields.push({ name: 'Motivo', value: '```' + (reason || DEFAULT_REASON) + '```' });
+  fields.push({ name: 'Motivo', value: '```' + (reason || DEFAULT_REASON) + '```', inline: false });
   embed.addFields(fields);
   if (guild?.name) {
     embed.setFooter({ text: guild.name });
@@ -114,6 +118,13 @@ function formatUserField(user, fallback = 'Desconhecido') {
   const mention = user.id ? `<@${user.id}>` : base;
   const idLine = user.id ? `ID: \`${user.id}\`` : 'ID: `N/A`';
   return `${mention}\n${idLine}`;
+}
+
+function buildDiscordTimestampValue(durationSeconds) {
+  if (!durationSeconds || Number.isNaN(durationSeconds)) return null;
+  const expiresAtSeconds = Math.floor((Date.now() + durationSeconds * 1000) / 1000);
+  if (!Number.isFinite(expiresAtSeconds)) return null;
+  return `<t:${expiresAtSeconds}:R>`;
 }
 
 module.exports = {

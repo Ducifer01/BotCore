@@ -132,9 +132,13 @@ function buildLogEmbed({ type, action, targetUser, moderatorUser, reason, guild,
     { name: 'Moderador', value: formatUserValue(moderatorUser, 'Desconhecido'), inline: true },
   ];
   if (type === COMMAND_TYPES.CASTIGO && action !== 'REMOVE' && durationSeconds) {
-    fields.push({ name: 'Duração', value: formatDuration(durationSeconds), inline: true });
+    const expirationValue = buildDiscordTimestampValue(durationSeconds);
+    if (expirationValue) {
+      fields.push({ name: 'Tempo', value: formatDuration(durationSeconds), inline: true });
+      fields.push({ name: 'Expira em', value: expirationValue, inline: true });
+    }
   }
-  fields.push({ name: 'Motivo', value: `\`\`\`${reason || 'Não informado'}\`\`\`` });
+  fields.push({ name: 'Motivo', value: `\`\`\`${reason || 'Não informado'}\`\`\``, inline: false });
   embed.addFields(fields);
   embed.setFooter({ text: guild.name });
   embed.setTimestamp(new Date());
@@ -190,3 +194,10 @@ module.exports = {
   sendDmIfConfigured,
   sendLogMessage,
 };
+
+function buildDiscordTimestampValue(durationSeconds) {
+  if (!durationSeconds || Number.isNaN(durationSeconds)) return null;
+  const expiresAtSeconds = Math.floor((Date.now() + durationSeconds * 1000) / 1000);
+  if (!Number.isFinite(expiresAtSeconds)) return null;
+  return `<t:${expiresAtSeconds}:R>`;
+}
