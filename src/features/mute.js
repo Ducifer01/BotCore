@@ -44,8 +44,11 @@ async function handleVoiceStateUpdate(oldState, newState) {
       await member.roles.add(cfg.muteVoiceRoleId, 'Reaplicando cargo de mute voz').catch(() => {});
     }
   } else {
-    if (joinedUnlockChannel && newState.serverMute) {
-      await newState.setMute(false, 'Canal de desbloqueio - mute manual liberado').catch(() => {});
+    if (newState.serverMute) {
+      const reason = joinedUnlockChannel
+        ? 'Canal de desbloqueio - mute manual liberado'
+        : 'Removendo mute de voz sem registro ativo';
+      await newState.setMute(false, reason).catch(() => {});
     }
     if (cfg.muteVoiceRoleId && member.roles.cache.has(cfg.muteVoiceRoleId)) {
       // Remove cargos aplicados manualmente, independente do canal, já que não há registro no sistema
