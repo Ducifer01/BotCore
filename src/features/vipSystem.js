@@ -253,7 +253,7 @@ async function syncChannelShares(channel, membership) {
   }
 }
 
-async function ensureVipChannel(interaction, membership, prisma) {
+async function ensureVipChannel(interaction, membership, prisma, { createIfMissing = false } = {}) {
   if (membership.channel?.channelId) {
     const existing = interaction.guild.channels.cache.get(membership.channel.channelId) || (await interaction.guild.channels.fetch(membership.channel.channelId).catch(() => null));
     if (existing) {
@@ -261,6 +261,15 @@ async function ensureVipChannel(interaction, membership, prisma) {
       await syncChannelShares(existing, membership);
       return { channel: existing, record: membership.channel };
     }
+    membership.channel = await saveVipChannel(
+      membership.id,
+      { channelId: null, name: null, userLimit: null, categoryId: null },
+      prisma,
+    );
+  }
+
+  if (!createIfMissing) {
+    throw new Error('Nenhum canal VIP encontrado. Use o botão "Criar canal".');
   }
 
   const baseName = (membership.channel?.name || `${interaction.user.username}-vip`).toLowerCase().slice(0, 32);
@@ -293,11 +302,11 @@ async function ensureVipChannel(interaction, membership, prisma) {
       name: channel.name,
       userLimit: channel.userLimit ?? null,
       categoryId: membership.plan?.callCategoryId || null,
-      channelParentId: membership.plan?.callCategoryId || null,
     },
     prisma,
   );
   membership.channel = record;
+  await applyBaseChannelPermissions(channel, membership);
   await syncChannelShares(channel, membership);
   return { channel, record };
 }
@@ -423,14 +432,16 @@ async function handleVipUser(interaction, ctx) {
     return;
   }
   if (interaction.customId === 'vipuser:channel') {
+    const hasChannel = Boolean(membership.channel?.channelId);
     const embed = new EmbedBuilder()
       .setTitle('Editar canal VIP')
       .setColor(0xffffff)
       .setDescription(membership.channel?.channelId ? `Canal atual: <#${membership.channel.channelId}>` : 'Nenhum canal criado.');
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('vipchan:name').setLabel('Editar nome').setEmoji('🏷️').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('vipchan:limit').setLabel('Editar limite').setEmoji('👥').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('vipchan:fix').setLabel('Desbugar').setEmoji('🔧').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('vipchan:create').setLabel('Criar canal').setEmoji('🆕').setStyle(ButtonStyle.Success).setDisabled(hasChannel),
+      new ButtonBuilder().setCustomId('vipchan:name').setLabel('Editar nome').setEmoji('🏷️').setStyle(ButtonStyle.Secondary).setDisabled(!hasChannel),
+      new ButtonBuilder().setCustomId('vipchan:limit').setLabel('Editar limite').setEmoji('👥').setStyle(ButtonStyle.Secondary).setDisabled(!hasChannel),
+      new ButtonBuilder().setCustomId('vipchan:fix').setLabel('Desbugar').setEmoji('🔧').setStyle(ButtonStyle.Danger).setDisabled(!hasChannel),
       new ButtonBuilder().setCustomId('vipchan:back').setLabel('Voltar').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
     );
     await interaction.update({ embeds: [embed], components: [row] });
@@ -516,57 +527,83 @@ async function handleVipChannel(interaction, ctx) {
     return;
   }
   if (action === 'fix') {
-    const { channel } = await ensureVipChannel(interaction, membership, prisma);
-    await applyBaseChannelPermissions(channel, membership);
-    await syncChannelShares(channel, membership);
-  await interaction.reply({ embeds: [buildInfoEmbed('Canal verificado e sincronizado.')], ephemeral: true });
+    try {
+      const { channel } = await ensureVipChannel(interaction, membership, prisma);
+      await applyBaseChannelPermissions(channel, membership);
+      await syncChannelShares(channel, membership);
+      await interaction.reply({ embeds: [buildInfoEmbed('Canal verificado e sincronizado.')], ephemeral: true });
+    } catch (err) {
+      await interaction.reply({ embeds: [buildInfoEmbed(err.message || 'Não foi possível verificar o canal.', true)], ephemeral: true }).catch(() => {});
+    }
+    return;
+  }
+  if (action === 'create') {
+    try {
+      const existingChannel = membership.channel?.channelId
+        ? interaction.guild.channels.cache.get(membership.channel.channelId) || (await interaction.guild.channels.fetch(membership.channel.channelId).catch(() => null))
+        : null;
+      if (existingChannel) {
+        await interaction.reply({ embeds: [buildInfoEmbed(`Você já possui um canal: ${existingChannel}.`)], ephemeral: true });
+        return;
+      }
+      const { channel } = await ensureVipChannel(interaction, membership, prisma, { createIfMissing: true });
+      await interaction.reply({ embeds: [buildInfoEmbed(`Canal criado com sucesso: ${channel}.`)], ephemeral: true });
+    } catch (err) {
+      await interaction.reply({ embeds: [buildInfoEmbed(err.message || 'Não foi possível criar o canal.', true)], ephemeral: true }).catch(() => {});
+    }
     return;
   }
   if (action === 'name') {
-    const { channel } = await ensureVipChannel(interaction, membership, prisma);
-    await promptText(interaction, 'vipchan-name', 'Digite o novo nome do canal.', async (value) => {
-      const safeName = value.slice(0, 32);
-      await channel.setName(safeName).catch(() => {
-        throw new Error('Não consegui renomear o canal.');
+    try {
+      const { channel } = await ensureVipChannel(interaction, membership, prisma);
+      await promptText(interaction, 'vipchan-name', 'Digite o novo nome do canal.', async (value) => {
+        const safeName = value.slice(0, 32);
+        await channel.setName(safeName).catch(() => {
+          throw new Error('Não consegui renomear o canal.');
+        });
+        await saveVipChannel(
+          membership.id,
+          {
+            channelId: channel.id,
+            name: safeName,
+            userLimit: channel.userLimit ?? null,
+            categoryId: channel.parentId || null,
+          },
+          prisma,
+        );
+        await interaction.followUp({ embeds: [buildInfoEmbed('Nome do canal atualizado.')], ephemeral: true });
       });
-      await saveVipChannel(
-        membership.id,
-        {
-          channelId: channel.id,
-          name: safeName,
-          userLimit: channel.userLimit ?? null,
-          categoryId: channel.parentId || null,
-          channelParentId: channel.parentId || null,
-        },
-        prisma,
-      );
-  await interaction.followUp({ embeds: [buildInfoEmbed('Nome do canal atualizado.')], ephemeral: true });
-    });
+    } catch (err) {
+      await interaction.reply({ embeds: [buildInfoEmbed(err.message || 'Não foi possível acessar o canal.', true)], ephemeral: true }).catch(() => {});
+    }
     return;
   }
   if (action === 'limit') {
-    const { channel } = await ensureVipChannel(interaction, membership, prisma);
-    await promptText(interaction, 'vipchan-limit', 'Informe o limite de usuários (0 = ilimitado, máximo 99).', async (value) => {
-      const parsed = parseInt(value, 10);
-      if (Number.isNaN(parsed) || parsed < 0 || parsed > 99) {
-        throw new Error('Informe um número entre 0 e 99.');
-      }
-      await channel.setUserLimit(parsed === 0 ? null : parsed).catch(() => {
-        throw new Error('Não consegui atualizar o limite.');
+    try {
+      const { channel } = await ensureVipChannel(interaction, membership, prisma);
+      await promptText(interaction, 'vipchan-limit', 'Informe o limite de usuários (0 = ilimitado, máximo 99).', async (value) => {
+        const parsed = parseInt(value, 10);
+        if (Number.isNaN(parsed) || parsed < 0 || parsed > 99) {
+          throw new Error('Informe um número entre 0 e 99.');
+        }
+        await channel.setUserLimit(parsed === 0 ? null : parsed).catch(() => {
+          throw new Error('Não consegui atualizar o limite.');
+        });
+        await saveVipChannel(
+          membership.id,
+          {
+            channelId: channel.id,
+            name: channel.name,
+            userLimit: parsed === 0 ? null : parsed,
+            categoryId: channel.parentId || null,
+          },
+          prisma,
+        );
+        await interaction.followUp({ embeds: [buildInfoEmbed('Limite atualizado.')], ephemeral: true });
       });
-      await saveVipChannel(
-        membership.id,
-        {
-          channelId: channel.id,
-          name: channel.name,
-          userLimit: parsed === 0 ? null : parsed,
-          categoryId: channel.parentId || null,
-          channelParentId: channel.parentId || null,
-        },
-        prisma,
-      );
-  await interaction.followUp({ embeds: [buildInfoEmbed('Limite atualizado.')], ephemeral: true });
-    });
+    } catch (err) {
+      await interaction.reply({ embeds: [buildInfoEmbed(err.message || 'Não foi possível acessar o canal.', true)], ephemeral: true }).catch(() => {});
+    }
   }
 }
 
@@ -591,17 +628,19 @@ async function showVipList(interaction, ctx, page = 1) {
     .setDescription(lines.join('\n') || 'Nenhum VIP ativo no momento.')
     .setFooter({ text: `Página ${currentPage}/${totalPages}` });
 
+  const prevDisabled = currentPage <= 1;
+  const nextDisabled = currentPage >= totalPages;
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId(`vipadmin:list:${Math.max(1, currentPage - 1)}`)
+      .setCustomId(prevDisabled ? 'vipadmin:list:prev-disabled' : `vipadmin:list:${Math.max(1, currentPage - 1)}`)
       .setEmoji('⬅️')
       .setStyle(ButtonStyle.Secondary)
-      .setDisabled(currentPage <= 1),
+      .setDisabled(prevDisabled),
     new ButtonBuilder()
-      .setCustomId(`vipadmin:list:${Math.min(totalPages, currentPage + 1)}`)
+      .setCustomId(nextDisabled ? 'vipadmin:list:next-disabled' : `vipadmin:list:${Math.min(totalPages, currentPage + 1)}`)
       .setEmoji('➡️')
       .setStyle(ButtonStyle.Secondary)
-      .setDisabled(currentPage >= totalPages),
+      .setDisabled(nextDisabled),
     new ButtonBuilder().setCustomId('vipadmin:home').setLabel('Voltar').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
   );
 
