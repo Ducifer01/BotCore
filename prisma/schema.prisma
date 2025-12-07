@@ -433,6 +433,7 @@ model VipTag {
   color         String?
   emoji         String?
   iconHash      String?
+  iconData      Bytes?
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
   membership    VipMembership @relation(fields: [membershipId], references: [id], onDelete: Cascade)

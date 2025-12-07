@@ -27,6 +27,28 @@ const INPUT_TIMEOUT = 120_000;
 let intervalRef = null;
 const promptCollectors = new Map();
 
+async function ensureInteractionAck(interaction) {
+  if (!interaction || interaction.deferred || interaction.replied) return;
+  if (typeof interaction.deferUpdate === 'function') {
+    await interaction.deferUpdate().catch(() => {});
+  } else if (typeof interaction.deferReply === 'function') {
+    await interaction.deferReply({ ephemeral: true }).catch(() => {});
+  }
+}
+
+async function ensureMemberHasTag(guild, membership, roleId) {
+  if (!roleId) return;
+  try {
+    const member = await guild.members.fetch(membership.userId).catch(() => null);
+    if (!member) return;
+    if (!member.roles.cache.has(roleId)) {
+      await member.roles.add(roleId).catch(() => {});
+    }
+  } catch {
+    // ignore failures silently
+  }
+}
+
 async function ensureMemberHasTag(guild, membership, roleId) {
   if (!roleId) return;
   try {
@@ -142,6 +164,68 @@ function buildVipHomePayload(user, membership) {
   return { embeds: [embed], components: [row] };
 }
 
+function buildVipTagView(membership) {
+  const hasTag = Boolean(membership.tag?.roleId);
+  const lines = [];
+  if (membership.tag?.roleId) {
+    lines.push(`• Cargo: <@&${membership.tag.roleId}>`);
+  }
+  if (membership.tag?.name) {
+    lines.push(`• Nome: ${membership.tag.name}`);
+  }
+  if (membership.tag?.color) {
+    lines.push(`• Cor: ${membership.tag.color}`);
+  }
+  const embed = new EmbedBuilder()
+    .setTitle('Editar tag')
+    .setColor(0xffffff)
+    .setDescription(lines.length ? lines.join('\n') : 'Nenhuma tag criada.')
+    .setFooter({ text: membership.tag?.roleId ? 'Tag ativa' : 'Crie sua tag para começar' });
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('viptag:create').setLabel('Criar tag').setEmoji('🆕').setStyle(ButtonStyle.Success).setDisabled(hasTag),
+    new ButtonBuilder().setCustomId('viptag:name').setLabel('Editar nome').setEmoji('🏷️').setStyle(ButtonStyle.Secondary).setDisabled(!hasTag),
+    new ButtonBuilder().setCustomId('viptag:color').setLabel('Editar cor').setEmoji('🎨').setStyle(ButtonStyle.Secondary).setDisabled(!hasTag),
+    new ButtonBuilder().setCustomId('viptag:emoji').setLabel('Editar emoji').setEmoji('😀').setStyle(ButtonStyle.Secondary).setDisabled(!hasTag),
+    new ButtonBuilder().setCustomId('viptag:back').setLabel('Voltar').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
+  );
+
+  return { embeds: [embed], components: [row] };
+}
+
+function buildVipChannelView(membership) {
+  const hasChannel = Boolean(membership.channel?.channelId);
+  const embed = new EmbedBuilder()
+    .setTitle('Editar canal VIP')
+    .setColor(0xffffff)
+    .setDescription(
+      hasChannel
+        ? [`• Canal: <#${membership.channel.channelId}>`, membership.channel.name ? `• Nome: ${membership.channel.name}` : null, membership.channel.userLimit ? `• Limite: ${membership.channel.userLimit}` : '• Limite: Ilimitado'].filter(Boolean).join('\n')
+        : 'Nenhum canal criado.',
+    )
+    .setFooter({ text: hasChannel ? 'Canal pronto' : 'Crie seu canal para começar' });
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('vipchan:create').setLabel('Criar canal').setEmoji('🆕').setStyle(ButtonStyle.Success).setDisabled(hasChannel),
+    new ButtonBuilder().setCustomId('vipchan:name').setLabel('Editar nome').setEmoji('🏷️').setStyle(ButtonStyle.Secondary).setDisabled(!hasChannel),
+    new ButtonBuilder().setCustomId('vipchan:limit').setLabel('Editar limite').setEmoji('👥').setStyle(ButtonStyle.Secondary).setDisabled(!hasChannel),
+    new ButtonBuilder().setCustomId('vipchan:fix').setLabel('Desbugar').setEmoji('🔧').setStyle(ButtonStyle.Danger).setDisabled(!hasChannel),
+    new ButtonBuilder().setCustomId('vipchan:back').setLabel('Voltar').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
+  );
+
+  return { embeds: [embed], components: [row] };
+}
+
+async function refreshTagView(interaction, membership) {
+  if (!interaction?.message) return;
+  await interaction.message.edit(buildVipTagView(membership)).catch(() => {});
+}
+
+async function refreshChannelView(interaction, membership) {
+  if (!interaction?.message) return;
+  await interaction.message.edit(buildVipChannelView(membership)).catch(() => {});
+}
+
 function buildInfoEmbed(message, isError = false) {
   return new EmbedBuilder().setColor(isError ? ERROR_COLOR : SUCCESS_COLOR).setDescription(message);
 }
@@ -185,7 +269,8 @@ async function promptText(interaction, action, question, handler) {
     await interaction.reply({ content: 'Abra este painel em um canal de texto para enviar respostas.', ephemeral: true });
     return;
   }
-  await interaction.reply({ content: question, ephemeral: true });
+  await ensureInteractionAck(interaction);
+  await interaction.followUp({ content: question, ephemeral: true });
   const key = getPromptKey(interaction.user.id, action, interaction.guildId);
   const filter = (msg) => msg.author.id === interaction.user.id && msg.channelId === interaction.channelId;
   const collector = interaction.channel.createMessageCollector({ filter, time: INPUT_TIMEOUT, max: 1 });
@@ -218,6 +303,9 @@ async function ensureVipTagRole(interaction, membership, prisma, { createIfMissi
   if (membership.tag?.roleId) {
     const existing = interaction.guild.roles.cache.get(membership.tag.roleId) || (await interaction.guild.roles.fetch(membership.tag.roleId).catch(() => null));
     if (existing) {
+      if (membership.tag.iconData) {
+        await existing.setIcon(membership.tag.iconData).catch(() => {});
+      }
       await ensureMemberHasTag(interaction.guild, membership, existing.id);
       return { role: existing, record: membership.tag };
     }
@@ -245,6 +333,9 @@ async function ensureVipTagRole(interaction, membership, prisma, { createIfMissi
   }
   const record = await saveVipTag(membership.id, { roleId: role.id, name: role.name, color }, prisma);
   membership.tag = record;
+  if (membership.tag?.iconData) {
+    await role.setIcon(membership.tag.iconData).catch(() => {});
+  }
   await ensureMemberHasTag(interaction.guild, membership, role.id);
   return { role, record };
 }
@@ -340,13 +431,25 @@ function parseHexColor(input) {
   return `#${value.toUpperCase()}`;
 }
 
-function extractEmojiId(input) {
-  const match = String(input || '').match(/^<a?:\w+:(\d+)>$/);
+function parseCustomEmoji(input) {
+  const match = String(input || '').trim().match(/^<a?:(\w+):(\d+)>$/);
   if (!match) return null;
   if (input.startsWith('<a:')) {
     throw new Error('Não é permitido usar emoji animado.');
   }
-  return match[1];
+  return { name: match[1] || 'emoji', id: match[2] };
+}
+
+async function resolveEmojiAsset(input) {
+  const parsed = parseCustomEmoji(input);
+  if (!parsed) return null;
+  const url = `https://cdn.discordapp.com/emojis/${parsed.id}.png?size=64&quality=lossless`;
+  const response = await fetch(url).catch(() => null);
+  if (!response || !response.ok) {
+    throw new Error('Não foi possível carregar o emoji informado.');
+  }
+  const buffer = Buffer.from(await response.arrayBuffer());
+  return { ...parsed, buffer };
 }
 
 function extractUserId(value) {
@@ -439,35 +542,11 @@ async function handleVipUser(interaction, ctx) {
     return;
   }
   if (interaction.customId === 'vipuser:tag') {
-    const hasTag = Boolean(membership.tag?.roleId);
-    const embed = new EmbedBuilder()
-      .setTitle('Editar tag')
-      .setColor(0xffffff)
-      .setDescription(membership.tag?.roleId ? `Tag atual: <@&${membership.tag.roleId}>` : 'Nenhuma tag criada.');
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('viptag:create').setLabel('Criar tag').setEmoji('🆕').setStyle(ButtonStyle.Success).setDisabled(hasTag),
-      new ButtonBuilder().setCustomId('viptag:name').setLabel('Editar nome').setEmoji('🏷️').setStyle(ButtonStyle.Secondary).setDisabled(!hasTag),
-      new ButtonBuilder().setCustomId('viptag:color').setLabel('Editar cor').setEmoji('🎨').setStyle(ButtonStyle.Secondary).setDisabled(!hasTag),
-      new ButtonBuilder().setCustomId('viptag:emoji').setLabel('Editar emoji').setEmoji('😀').setStyle(ButtonStyle.Secondary).setDisabled(!hasTag),
-      new ButtonBuilder().setCustomId('viptag:back').setLabel('Voltar').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
-    );
-    await interaction.update({ embeds: [embed], components: [row] });
+    await interaction.update(buildVipTagView(membership));
     return;
   }
   if (interaction.customId === 'vipuser:channel') {
-    const hasChannel = Boolean(membership.channel?.channelId);
-    const embed = new EmbedBuilder()
-      .setTitle('Editar canal VIP')
-      .setColor(0xffffff)
-      .setDescription(membership.channel?.channelId ? `Canal atual: <#${membership.channel.channelId}>` : 'Nenhum canal criado.');
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('vipchan:create').setLabel('Criar canal').setEmoji('🆕').setStyle(ButtonStyle.Success).setDisabled(hasChannel),
-      new ButtonBuilder().setCustomId('vipchan:name').setLabel('Editar nome').setEmoji('🏷️').setStyle(ButtonStyle.Secondary).setDisabled(!hasChannel),
-      new ButtonBuilder().setCustomId('vipchan:limit').setLabel('Editar limite').setEmoji('👥').setStyle(ButtonStyle.Secondary).setDisabled(!hasChannel),
-      new ButtonBuilder().setCustomId('vipchan:fix').setLabel('Desbugar').setEmoji('🔧').setStyle(ButtonStyle.Danger).setDisabled(!hasChannel),
-      new ButtonBuilder().setCustomId('vipchan:back').setLabel('Voltar').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
-    );
-    await interaction.update({ embeds: [embed], components: [row] });
+    await interaction.update(buildVipChannelView(membership));
     return;
   }
   // fallback: rebuild painel principal
@@ -488,19 +567,28 @@ async function handleVipTag(interaction, ctx) {
     await interaction.update(payload).catch(() => {});
     return;
   }
+    await ensureInteractionAck(interaction);
+  const persistTag = async (data) => {
+    const record = await saveVipTag(membership.id, data, prisma);
+    membership.tag = record;
+    await refreshTagView(interaction, membership);
+  };
+
   if (action === 'create') {
     try {
       if (membership.tag?.roleId) {
         const existing = interaction.guild.roles.cache.get(membership.tag.roleId) || (await interaction.guild.roles.fetch(membership.tag.roleId).catch(() => null));
         if (existing) {
-          await interaction.reply({ embeds: [buildInfoEmbed(`Você já possui uma tag: <@&${existing.id}>.`)], ephemeral: true });
+          await interaction.followUp({ embeds: [buildInfoEmbed(`Você já possui uma tag: <@&${existing.id}>.`)], ephemeral: true });
+          await refreshTagView(interaction, membership);
           return;
         }
       }
       const { role } = await ensureVipTagRole(interaction, membership, prisma, { createIfMissing: true });
-      await interaction.reply({ embeds: [buildInfoEmbed(`Tag criada com sucesso: <@&${role.id}>.`)], ephemeral: true });
+      await interaction.followUp({ embeds: [buildInfoEmbed(`Tag criada com sucesso: <@&${role.id}>.`)], ephemeral: true });
+      await refreshTagView(interaction, membership);
     } catch (err) {
-      await interaction.reply({ embeds: [buildInfoEmbed(err.message || 'Não foi possível criar a tag.', true)], ephemeral: true }).catch(() => {});
+      await interaction.followUp({ embeds: [buildInfoEmbed(err.message || 'Não foi possível criar a tag.', true)], ephemeral: true }).catch(() => {});
     }
     return;
   }
@@ -510,7 +598,7 @@ async function handleVipTag(interaction, ctx) {
       const { role } = await ensureVipTagRole(interaction, membership, prisma);
       await handler(role);
     } catch (err) {
-      await interaction.reply({ embeds: [buildInfoEmbed(err.message || 'Não foi possível acessar a tag.', true)], ephemeral: true }).catch(() => {});
+      await interaction.followUp({ embeds: [buildInfoEmbed(err.message || 'Não foi possível acessar a tag.', true)], ephemeral: true }).catch(() => {});
     }
   };
 
@@ -523,7 +611,7 @@ async function handleVipTag(interaction, ctx) {
         await role.setName(value).catch(() => {
           throw new Error('Não consegui atualizar o nome da tag.');
         });
-        await saveVipTag(membership.id, { name: value }, prisma);
+        await persistTag({ name: value });
         await interaction.followUp({ embeds: [buildInfoEmbed('Nome da tag atualizado.')], ephemeral: true });
       });
     });
@@ -536,7 +624,7 @@ async function handleVipTag(interaction, ctx) {
         await role.setColor(hex).catch(() => {
           throw new Error('Não consegui aplicar a cor.');
         });
-        await saveVipTag(membership.id, { color: hex }, prisma);
+        await persistTag({ color: hex });
         await interaction.followUp({ embeds: [buildInfoEmbed('Cor da tag atualizada.')], ephemeral: true });
       });
     });
@@ -544,22 +632,17 @@ async function handleVipTag(interaction, ctx) {
   }
   if (action === 'emoji') {
     await useTagRole(async (role) => {
-      await promptText(interaction, 'viptag-emoji', 'Envie um emoji do servidor (formato <:nome:id>).', async (value) => {
-        const emojiId = extractEmojiId(value);
-        if (!emojiId) {
+      await promptText(interaction, 'viptag-emoji', 'Envie um emoji no formato <:nome:id>.', async (value) => {
+        const emojiData = await resolveEmojiAsset(value);
+        if (!emojiData) {
           throw new Error('Formato inválido. Use <:nome:id>.');
         }
-        const emoji = interaction.guild.emojis.cache.get(emojiId) || (await interaction.guild.emojis.fetch(emojiId).catch(() => null));
-        if (!emoji) {
-          throw new Error('Emoji não encontrado neste servidor.');
-        }
-        const iconUrl = emoji.imageURL({ extension: 'png', size: 64 });
         try {
-          await role.setIcon(iconUrl);
+          await role.setIcon(emojiData.buffer);
         } catch (err) {
           throw new Error('Não foi possível aplicar o emoji (verifique se o servidor permite ícones em cargos).');
         }
-        await saveVipTag(membership.id, { emoji: emoji.name, iconHash: emojiId }, prisma);
+        await persistTag({ emoji: emojiData.name, iconHash: emojiData.id, iconData: emojiData.buffer });
         await interaction.followUp({ embeds: [buildInfoEmbed('Emoji aplicado à tag.')], ephemeral: true });
       });
     });
@@ -580,14 +663,21 @@ async function handleVipChannel(interaction, ctx) {
     await interaction.update(payload).catch(() => {});
     return;
   }
+  await ensureInteractionAck(interaction);
+  const persistChannel = async (data) => {
+    const record = await saveVipChannel(membership.id, data, prisma);
+    membership.channel = record;
+    await refreshChannelView(interaction, membership);
+  };
   if (action === 'fix') {
     try {
       const { channel } = await ensureVipChannel(interaction, membership, prisma);
       await applyBaseChannelPermissions(channel, membership);
       await syncChannelShares(channel, membership);
-      await interaction.reply({ embeds: [buildInfoEmbed('Canal verificado e sincronizado.')], ephemeral: true });
+      await interaction.followUp({ embeds: [buildInfoEmbed('Canal verificado e sincronizado.')], ephemeral: true });
+      await refreshChannelView(interaction, membership);
     } catch (err) {
-      await interaction.reply({ embeds: [buildInfoEmbed(err.message || 'Não foi possível verificar o canal.', true)], ephemeral: true }).catch(() => {});
+      await interaction.followUp({ embeds: [buildInfoEmbed(err.message || 'Não foi possível verificar o canal.', true)], ephemeral: true }).catch(() => {});
     }
     return;
   }
@@ -597,13 +687,15 @@ async function handleVipChannel(interaction, ctx) {
         ? interaction.guild.channels.cache.get(membership.channel.channelId) || (await interaction.guild.channels.fetch(membership.channel.channelId).catch(() => null))
         : null;
       if (existingChannel) {
-        await interaction.reply({ embeds: [buildInfoEmbed(`Você já possui um canal: ${existingChannel}.`)], ephemeral: true });
+        await interaction.followUp({ embeds: [buildInfoEmbed(`Você já possui um canal: ${existingChannel}.`)], ephemeral: true });
+        await refreshChannelView(interaction, membership);
         return;
       }
       const { channel } = await ensureVipChannel(interaction, membership, prisma, { createIfMissing: true });
-      await interaction.reply({ embeds: [buildInfoEmbed(`Canal criado com sucesso: ${channel}.`)], ephemeral: true });
+      await interaction.followUp({ embeds: [buildInfoEmbed(`Canal criado com sucesso: ${channel}.`)], ephemeral: true });
+      await refreshChannelView(interaction, membership);
     } catch (err) {
-      await interaction.reply({ embeds: [buildInfoEmbed(err.message || 'Não foi possível criar o canal.', true)], ephemeral: true }).catch(() => {});
+      await interaction.followUp({ embeds: [buildInfoEmbed(err.message || 'Não foi possível criar o canal.', true)], ephemeral: true }).catch(() => {});
     }
     return;
   }
@@ -615,20 +707,16 @@ async function handleVipChannel(interaction, ctx) {
         await channel.setName(safeName).catch(() => {
           throw new Error('Não consegui renomear o canal.');
         });
-        await saveVipChannel(
-          membership.id,
-          {
-            channelId: channel.id,
-            name: safeName,
-            userLimit: channel.userLimit ?? null,
-            categoryId: channel.parentId || null,
-          },
-          prisma,
-        );
+        await persistChannel({
+          channelId: channel.id,
+          name: safeName,
+          userLimit: channel.userLimit ?? null,
+          categoryId: channel.parentId || null,
+        });
         await interaction.followUp({ embeds: [buildInfoEmbed('Nome do canal atualizado.')], ephemeral: true });
       });
     } catch (err) {
-      await interaction.reply({ embeds: [buildInfoEmbed(err.message || 'Não foi possível acessar o canal.', true)], ephemeral: true }).catch(() => {});
+      await interaction.followUp({ embeds: [buildInfoEmbed(err.message || 'Não foi possível acessar o canal.', true)], ephemeral: true }).catch(() => {});
     }
     return;
   }
@@ -643,20 +731,16 @@ async function handleVipChannel(interaction, ctx) {
         await channel.setUserLimit(parsed === 0 ? null : parsed).catch(() => {
           throw new Error('Não consegui atualizar o limite.');
         });
-        await saveVipChannel(
-          membership.id,
-          {
-            channelId: channel.id,
-            name: channel.name,
-            userLimit: parsed === 0 ? null : parsed,
-            categoryId: channel.parentId || null,
-          },
-          prisma,
-        );
+        await persistChannel({
+          channelId: channel.id,
+          name: channel.name,
+          userLimit: parsed === 0 ? null : parsed,
+          categoryId: channel.parentId || null,
+        });
         await interaction.followUp({ embeds: [buildInfoEmbed('Limite atualizado.')], ephemeral: true });
       });
     } catch (err) {
-      await interaction.reply({ embeds: [buildInfoEmbed(err.message || 'Não foi possível acessar o canal.', true)], ephemeral: true }).catch(() => {});
+      await interaction.followUp({ embeds: [buildInfoEmbed(err.message || 'Não foi possível acessar o canal.', true)], ephemeral: true }).catch(() => {});
     }
   }
 }
