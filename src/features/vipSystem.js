@@ -27,6 +27,19 @@ const INPUT_TIMEOUT = 120_000;
 let intervalRef = null;
 const promptCollectors = new Map();
 
+async function ensureMemberHasTag(guild, membership, roleId) {
+  if (!roleId) return;
+  try {
+    const member = await guild.members.fetch(membership.userId).catch(() => null);
+    if (!member) return;
+    if (!member.roles.cache.has(roleId)) {
+      await member.roles.add(roleId).catch(() => {});
+    }
+  } catch {
+    // ignore assignment failures silently
+  }
+}
+
 function registerVipFeature(client) {
   if (intervalRef) {
     clearInterval(intervalRef);
@@ -205,6 +218,7 @@ async function ensureVipTagRole(interaction, membership, prisma, { createIfMissi
   if (membership.tag?.roleId) {
     const existing = interaction.guild.roles.cache.get(membership.tag.roleId) || (await interaction.guild.roles.fetch(membership.tag.roleId).catch(() => null));
     if (existing) {
+      await ensureMemberHasTag(interaction.guild, membership, existing.id);
       return { role: existing, record: membership.tag };
     }
     membership.tag = await saveVipTag(membership.id, { roleId: null }, prisma);
@@ -231,6 +245,7 @@ async function ensureVipTagRole(interaction, membership, prisma, { createIfMissi
   }
   const record = await saveVipTag(membership.id, { roleId: role.id, name: role.name, color }, prisma);
   membership.tag = record;
+  await ensureMemberHasTag(interaction.guild, membership, role.id);
   return { role, record };
 }
 
