@@ -18,6 +18,7 @@ const syncFeature = require('./features/categorySync');
 const autoModFeature = require('./features/autoMod');
 const moderationConfig = require('./features/moderationConfig');
 const moderationCommands = require('./features/moderationCommands');
+const muteCommands = require('./features/muteCommands');
 const { ALLOWED_GUILD_IDS, isGuildAllowed } = require('./config');
 
 const client = new Client({ intents: [
@@ -67,7 +68,7 @@ const interactionFeatures = [
   { handleInteraction: handleSupportInteraction },
 ];
 
-const messageFeatures = [autoModFeature, roleEditorFeature, instaFeature, moderationCommands];
+const messageFeatures = [autoModFeature, roleEditorFeature, instaFeature, moderationCommands, muteCommands];
 const guildUpdateFeatures = [instaFeature];
 
 function buildHandlerContext() {

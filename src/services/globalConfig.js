@@ -5,6 +5,7 @@ async function getGlobalConfig(prisma = getPrisma()) {
     include: {
       ticketPingRolesGlobal: true,
       supportRolesGlobal: true,
+      mutePermissions: true,
       autoModConfig: {
         include: {
           blockedWords: true,

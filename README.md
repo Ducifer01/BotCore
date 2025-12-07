@@ -106,7 +106,24 @@ Uso:
   - `/castigo` / `!castigo <id/menção> <motivo> <tempo>` — aplica timeout (tempo no formato `30s`, `5m`, `2h`, `1d`, `1w`).
   - `/removercastigo` / `!removercastigo <id/menção> [motivo]` — remove o timeout.
 - Hierarquia sempre é respeitada: nem o executor nem o bot podem agir em alguém com cargo igual/maior.
-- Os logs seguem o layout solicitado: título específico (Banimento/Banimento removido/Castigo aplicado/Castigo removido), campos "Membro" e "Moderador" no formato `nome | 
+- Os logs seguem o layout solicitado: título específico (Banimento/Banimento removido/Castigo aplicado/Castigo removido), campos "Membro" e "Moderador" no formato `<@user> (tag)\nID: \\`123\\`` e campo "Motivo" representado dentro de um bloco de código.
+
+### Mutes (voz e chat)
+- Dentro do `/menu`, escolha **Configurar Mute** para abrir o painel com duas abas:
+	- **Mute Voz (!mutecall / !unmutecall)**: define o **Cargo mutado voz**, o **Canal de desbloqueio** (opcional), o **Canal de log** e permissões individuais para os comandos. Os selects já vêm pré-preenchidos com os valores salvos e usam Role/Channel Select com autocomplete.
+	- **Mute Chat (!mute / !unmute)**: define o **Cargo mutado chat**, o **Canal de log** e permissões independentes dos demais módulos.
+	- Em cada subpainel há botões para abrir sub-embeds de seleção e botões "Permissões" que carregam um select de cargos com opção de limpar (voltando ao padrão posse/Admin).
+- Prefix commands disponíveis:
+	- `!mutecall <@user/id> <tempo> [motivo]` — aplica server mute + cargo configurado. Tempo aceita `Xs`, `Xm` ou `Xh`. Motivo padrão: "Motivo não especificado".
+	- `!unmutecall <@user/id> [motivo]` — remove o mute de voz. Antes de remover o cargo/timeout o bot marca o mute como finalizado no banco e aguarda 2 segundos para evitar re-aplicações indevidas.
+	- `!mute <@user/id> <tempo> [motivo]` — adiciona o cargo de mute chat e registra no banco para persistência.
+	- `!unmute <@user/id> [motivo]` — remove o cargo de mute chat e encerra o registro.
+- Para cada ação o bot envia **somente um embed** no canal onde o comando foi executado (o embed é apagado automaticamente após 5 segundos) e replica o mesmo embed no canal de log correspondente (sem deletar).
+- O sistema salva todos os mutes ativos no banco (`VoiceMute` e `ChatMute`) e executa as seguintes proteções automaticamente:
+	- Reaplica server mute/cargo sempre que alguém tenta remover manualmente durante um mute ativo.
+	- Remove cargos/mutes aplicados manualmente se não houver registro correspondente.
+	- Após reiniciar o bot, todos os mutes ativos são restaurados (cargo + estado de voz).
+	- Um job periódico verifica expirações e remove mutes vencidos, registrando o log com o bot como executor.
 
 ## Notas
 - Ao iniciar, o bot tenta sincronizar os comandos na guild definida por `DEV_GUILD_ID`. Se não encontrar a guild e `SYNC_GLOBAL_FALLBACK=true`, faz fallback para sincronização global (pode levar até ~1h para aparecer).

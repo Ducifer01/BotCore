@@ -136,8 +136,7 @@ async function handleMessage(message, ctx) {
   const commandName = (commandNameRaw || '').toLowerCase();
   const handler = COMMAND_HANDLERS[commandName];
   if (!handler) {
-    await deleteCommandMessage(message);
-    return true;
+    return false;
   }
 
   await deleteCommandMessage(message);

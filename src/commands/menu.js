@@ -28,7 +28,7 @@ module.exports = {
       .setPlaceholder('Escolha uma seção...')
       .addOptions([
         { label: 'Configurar Insta', value: 'insta', description: 'Canais e opções do Instagram' },
-        { label: 'Configurar Mute', value: 'mute', description: 'Cargo mutado, canal de desbloqueio e bot responsável' },
+  { label: 'Configurar Mute', value: 'mute', description: 'Cargos, logs e permissões para mute de voz/chat' },
         { label: 'Configurar Suporte', value: 'support', description: 'Painel, cargos e logs do suporte' },
         { label: 'Configurar AutoMod', value: 'automod', description: 'Palavras bloqueadas e punições automáticas' },
         { label: 'Configurar Moderação', value: 'moderation', description: 'Banimentos, castigos e permissões' }

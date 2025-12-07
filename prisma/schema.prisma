@@ -10,19 +10,21 @@ datasource db {
 
 // Configuração 100% global: eliminar distinções por guild
 model GlobalConfig {
-  id                   Int      @id @default(autoincrement())
+  id                     Int      @id @default(autoincrement())
   // Verificação
-  verifyPanelChannelId String?
-  mainRoleId           String?
-  verifiedRoleId       String?
+  verifyPanelChannelId   String?
+  mainRoleId             String?
+  verifiedRoleId         String?
   // Insta
-  instaBoysChannelId   String?
-  instaGirlsChannelId  String?
-  photosChannelId      String?
+  instaBoysChannelId     String?
+  instaGirlsChannelId    String?
+  photosChannelId        String?
   // Mute feature (global)
-  muteBotId            String?  // ID do bot que é o único autorizado a silenciar/desmutar
-  muteRoleId           String?  // Cargo aplicado a usuários silenciados pelo bot especificado
-  muteUnlockChannelId  String?  // Canal de voz: entrando aqui remove mute se NÃO foi aplicado pelo bot especificado
+  muteVoiceRoleId        String?  // Cargo aplicado a usuários silenciados por mutecall
+  muteVoiceUnlockChannelId String? // Canal de voz para desbloqueio automático
+  muteVoiceLogChannelId  String?
+  muteChatRoleId         String?  // Cargo aplicado por mute de chat
+  muteChatLogChannelId   String?
   // Suporte (global)
   supportPanelChannelId String?
   supportLogChannelId   String?
@@ -33,6 +35,10 @@ model GlobalConfig {
   autoModConfig        AutoModConfig?
   // Moderação
   moderationConfig     ModerationConfig?
+  // Mute config avançada
+  mutePermissions      MutePermission[]
+  voiceMutes           VoiceMute[]
+  chatMutes            ChatMute[]
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 }
@@ -104,6 +110,16 @@ model ModerationPermission {
   config              ModerationConfig  @relation(fields: [moderationConfigId], references: [id], onDelete: Cascade)
 
   @@unique([moderationConfigId, commandType, roleId])
+}
+
+model MutePermission {
+  id             Int          @id @default(autoincrement())
+  globalConfigId Int
+  commandType    String
+  roleId         String
+  config         GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([globalConfigId, commandType, roleId])
 }
 
 model SupportTicket {
@@ -183,6 +199,40 @@ model Guild {
   verifiedUsers VerifiedUser[]
   instaPosts    InstaPost[]
   instaWinners  InstaWinner[]
+}
+
+model VoiceMute {
+  id               Int      @id @default(autoincrement())
+  globalConfigId   Int
+  guildId          String
+  userId           String
+  moderatorId      String?
+  reason           String?
+  durationSeconds  Int?
+  expiresAt        DateTime?
+  endedAt          DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  config           GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
+
+  @@index([guildId, userId])
+}
+
+model ChatMute {
+  id               Int      @id @default(autoincrement())
+  globalConfigId   Int
+  guildId          String
+  userId           String
+  moderatorId      String?
+  reason           String?
+  durationSeconds  Int?
+  expiresAt        DateTime?
+  endedAt          DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  config           GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
+
+  @@index([guildId, userId])
 }
 
 model CommandConfig {
