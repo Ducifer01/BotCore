@@ -201,13 +201,19 @@ async function promptText(interaction, action, question, handler) {
   });
 }
 
-async function ensureVipTagRole(interaction, membership, prisma) {
+async function ensureVipTagRole(interaction, membership, prisma, { createIfMissing = false } = {}) {
   if (membership.tag?.roleId) {
     const existing = interaction.guild.roles.cache.get(membership.tag.roleId) || (await interaction.guild.roles.fetch(membership.tag.roleId).catch(() => null));
     if (existing) {
       return { role: existing, record: membership.tag };
     }
+    membership.tag = await saveVipTag(membership.id, { roleId: null }, prisma);
   }
+
+  if (!createIfMissing) {
+    throw new Error('Nenhuma tag encontrada. Use o botão "Criar tag".');
+  }
+
   const baseName = (membership.tag?.name || `VIP ${interaction.user.username}`).slice(0, 90);
   const color = membership.tag?.color || '#ffffff';
   const role = await interaction.guild.roles.create({
@@ -418,14 +424,16 @@ async function handleVipUser(interaction, ctx) {
     return;
   }
   if (interaction.customId === 'vipuser:tag') {
+    const hasTag = Boolean(membership.tag?.roleId);
     const embed = new EmbedBuilder()
       .setTitle('Editar tag')
       .setColor(0xffffff)
       .setDescription(membership.tag?.roleId ? `Tag atual: <@&${membership.tag.roleId}>` : 'Nenhuma tag criada.');
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('viptag:name').setLabel('Editar nome').setEmoji('🏷️').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('viptag:color').setLabel('Editar cor').setEmoji('🎨').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('viptag:emoji').setLabel('Editar emoji').setEmoji('😀').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('viptag:create').setLabel('Criar tag').setEmoji('🆕').setStyle(ButtonStyle.Success).setDisabled(hasTag),
+      new ButtonBuilder().setCustomId('viptag:name').setLabel('Editar nome').setEmoji('🏷️').setStyle(ButtonStyle.Secondary).setDisabled(!hasTag),
+      new ButtonBuilder().setCustomId('viptag:color').setLabel('Editar cor').setEmoji('🎨').setStyle(ButtonStyle.Secondary).setDisabled(!hasTag),
+      new ButtonBuilder().setCustomId('viptag:emoji').setLabel('Editar emoji').setEmoji('😀').setStyle(ButtonStyle.Secondary).setDisabled(!hasTag),
       new ButtonBuilder().setCustomId('viptag:back').setLabel('Voltar').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
     );
     await interaction.update({ embeds: [embed], components: [row] });
@@ -465,49 +473,80 @@ async function handleVipTag(interaction, ctx) {
     await interaction.update(payload).catch(() => {});
     return;
   }
-  const { role } = await ensureVipTagRole(interaction, membership, prisma);
-  if (action === 'name') {
-    await promptText(interaction, 'viptag-name', 'Digite o novo nome da tag. Para cancelar, escreva **cancelar**.', async (value) => {
-      if (value.length < 2 || value.length > 32) {
-        throw new Error('O nome deve ter entre 2 e 32 caracteres.');
+  if (action === 'create') {
+    try {
+      if (membership.tag?.roleId) {
+        const existing = interaction.guild.roles.cache.get(membership.tag.roleId) || (await interaction.guild.roles.fetch(membership.tag.roleId).catch(() => null));
+        if (existing) {
+          await interaction.reply({ embeds: [buildInfoEmbed(`Você já possui uma tag: <@&${existing.id}>.`)], ephemeral: true });
+          return;
+        }
       }
-      await role.setName(value).catch(() => {
-        throw new Error('Não consegui atualizar o nome da tag.');
+      const { role } = await ensureVipTagRole(interaction, membership, prisma, { createIfMissing: true });
+      await interaction.reply({ embeds: [buildInfoEmbed(`Tag criada com sucesso: <@&${role.id}>.`)], ephemeral: true });
+    } catch (err) {
+      await interaction.reply({ embeds: [buildInfoEmbed(err.message || 'Não foi possível criar a tag.', true)], ephemeral: true }).catch(() => {});
+    }
+    return;
+  }
+
+  const useTagRole = async (handler) => {
+    try {
+      const { role } = await ensureVipTagRole(interaction, membership, prisma);
+      await handler(role);
+    } catch (err) {
+      await interaction.reply({ embeds: [buildInfoEmbed(err.message || 'Não foi possível acessar a tag.', true)], ephemeral: true }).catch(() => {});
+    }
+  };
+
+  if (action === 'name') {
+    await useTagRole(async (role) => {
+      await promptText(interaction, 'viptag-name', 'Digite o novo nome da tag. Para cancelar, escreva **cancelar**.', async (value) => {
+        if (value.length < 2 || value.length > 32) {
+          throw new Error('O nome deve ter entre 2 e 32 caracteres.');
+        }
+        await role.setName(value).catch(() => {
+          throw new Error('Não consegui atualizar o nome da tag.');
+        });
+        await saveVipTag(membership.id, { name: value }, prisma);
+        await interaction.followUp({ embeds: [buildInfoEmbed('Nome da tag atualizado.')], ephemeral: true });
       });
-  await saveVipTag(membership.id, { name: value }, prisma);
-  await interaction.followUp({ embeds: [buildInfoEmbed('Nome da tag atualizado.')], ephemeral: true });
     });
     return;
   }
   if (action === 'color') {
-    await promptText(interaction, 'viptag-color', 'Envie uma cor em HEX (ex: #FF0000).', async (value) => {
-      const hex = parseHexColor(value);
-      await role.setColor(hex).catch(() => {
-        throw new Error('Não consegui aplicar a cor.');
+    await useTagRole(async (role) => {
+      await promptText(interaction, 'viptag-color', 'Envie uma cor em HEX (ex: #FF0000).', async (value) => {
+        const hex = parseHexColor(value);
+        await role.setColor(hex).catch(() => {
+          throw new Error('Não consegui aplicar a cor.');
+        });
+        await saveVipTag(membership.id, { color: hex }, prisma);
+        await interaction.followUp({ embeds: [buildInfoEmbed('Cor da tag atualizada.')], ephemeral: true });
       });
-  await saveVipTag(membership.id, { color: hex }, prisma);
-  await interaction.followUp({ embeds: [buildInfoEmbed('Cor da tag atualizada.')], ephemeral: true });
     });
     return;
   }
   if (action === 'emoji') {
-    await promptText(interaction, 'viptag-emoji', 'Envie um emoji do servidor (formato <:nome:id>).', async (value) => {
-      const emojiId = extractEmojiId(value);
-      if (!emojiId) {
-        throw new Error('Formato inválido. Use <:nome:id>.');
-      }
-      const emoji = interaction.guild.emojis.cache.get(emojiId) || (await interaction.guild.emojis.fetch(emojiId).catch(() => null));
-      if (!emoji) {
-        throw new Error('Emoji não encontrado neste servidor.');
-      }
-      const iconUrl = emoji.imageURL({ extension: 'png', size: 64 });
-      try {
-        await role.setIcon(iconUrl);
-      } catch (err) {
-        throw new Error('Não foi possível aplicar o emoji (verifique se o servidor permite ícones em cargos).');
-      }
-  await saveVipTag(membership.id, { emoji: emoji.name, iconHash: emojiId }, prisma);
-  await interaction.followUp({ embeds: [buildInfoEmbed('Emoji aplicado à tag.')], ephemeral: true });
+    await useTagRole(async (role) => {
+      await promptText(interaction, 'viptag-emoji', 'Envie um emoji do servidor (formato <:nome:id>).', async (value) => {
+        const emojiId = extractEmojiId(value);
+        if (!emojiId) {
+          throw new Error('Formato inválido. Use <:nome:id>.');
+        }
+        const emoji = interaction.guild.emojis.cache.get(emojiId) || (await interaction.guild.emojis.fetch(emojiId).catch(() => null));
+        if (!emoji) {
+          throw new Error('Emoji não encontrado neste servidor.');
+        }
+        const iconUrl = emoji.imageURL({ extension: 'png', size: 64 });
+        try {
+          await role.setIcon(iconUrl);
+        } catch (err) {
+          throw new Error('Não foi possível aplicar o emoji (verifique se o servidor permite ícones em cargos).');
+        }
+        await saveVipTag(membership.id, { emoji: emoji.name, iconHash: emojiId }, prisma);
+        await interaction.followUp({ embeds: [buildInfoEmbed('Emoji aplicado à tag.')], ephemeral: true });
+      });
     });
     return;
   }
