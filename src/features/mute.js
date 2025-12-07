@@ -1,10 +1,11 @@
 const { getPrisma } = require('../db');
 const { isGuildAllowed } = require('../config');
-const { buildMuteLogEmbed, buildMuteExpirationEmbed } = require('../lib/mute');
+const { buildMuteExpirationEmbed } = require('../lib/mute');
 const { sendLogMessage } = require('../lib/moderation');
 
 const CHECK_INTERVAL_MS = 15000;
 const RELEASE_DELAY_MS = 2000;
+const EXPIRATION_EMBED_TTL = 5000;
 
 let sweepInterval;
 
@@ -123,23 +124,16 @@ async function releaseVoiceMute(client, entry, cfg) {
   if (cfg?.muteVoiceRoleId && member.roles.cache.has(cfg.muteVoiceRoleId)) {
     await member.roles.remove(cfg.muteVoiceRoleId, 'Mute de voz expirado').catch(() => {});
   }
-  if (cfg?.muteVoiceLogChannelId) {
-    const embed = buildMuteLogEmbed({
-      scope: 'voice',
-      action: 'remove',
-      targetUser: member.user,
-      moderatorUser: client.user,
-      reason: entry.reason || 'Tempo expirado',
-      guild,
-    });
-    await sendLogMessage(guild, cfg.muteVoiceLogChannelId, embed);
-  }
-  await notifyMuteExpiration(client, entry.commandChannelId, buildMuteExpirationEmbed({
+  const expirationEmbed = buildMuteExpirationEmbed({
     scope: 'voice',
     targetUser: member.user,
     reason: entry.reason || 'Tempo expirado',
     guild,
-  }));
+  });
+  await notifyMuteExpiration(client, entry.commandChannelId, expirationEmbed);
+  if (cfg?.muteVoiceLogChannelId) {
+    await sendLogMessage(guild, cfg.muteVoiceLogChannelId, expirationEmbed);
+  }
 }
 
 async function releaseChatMute(client, entry, cfg) {
@@ -150,23 +144,16 @@ async function releaseChatMute(client, entry, cfg) {
   if (cfg?.muteChatRoleId && member.roles.cache.has(cfg.muteChatRoleId)) {
     await member.roles.remove(cfg.muteChatRoleId, 'Mute de chat expirado').catch(() => {});
   }
-  if (cfg?.muteChatLogChannelId) {
-    const embed = buildMuteLogEmbed({
-      scope: 'chat',
-      action: 'remove',
-      targetUser: member.user,
-      moderatorUser: client.user,
-      reason: entry.reason || 'Tempo expirado',
-      guild,
-    });
-    await sendLogMessage(guild, cfg.muteChatLogChannelId, embed);
-  }
-  await notifyMuteExpiration(client, entry.commandChannelId, buildMuteExpirationEmbed({
+  const expirationEmbed = buildMuteExpirationEmbed({
     scope: 'chat',
     targetUser: member.user,
     reason: entry.reason || 'Tempo expirado',
     guild,
-  }));
+  });
+  await notifyMuteExpiration(client, entry.commandChannelId, expirationEmbed);
+  if (cfg?.muteChatLogChannelId) {
+    await sendLogMessage(guild, cfg.muteChatLogChannelId, expirationEmbed);
+  }
 }
 
 async function loadConfigsFor(entries) {
@@ -215,7 +202,11 @@ async function notifyMuteExpiration(client, channelId, embed) {
   if (!channelId || !embed) return;
   const channel = await client.channels.fetch(channelId).catch(() => null);
   if (!channel || typeof channel.isTextBased !== 'function' || !channel.isTextBased()) return;
-  await channel.send({ embeds: [embed] }).catch(() => {});
+  const sent = await channel.send({ embeds: [embed] }).catch(() => null);
+  if (sent) {
+    const timeout = setTimeout(() => sent.delete().catch(() => {}), EXPIRATION_EMBED_TTL);
+    if (typeof timeout.unref === 'function') timeout.unref();
+  }
 }
 
 function delay(ms) {

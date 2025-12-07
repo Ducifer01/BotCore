@@ -80,7 +80,7 @@ function buildMuteLogEmbed({ scope, action, targetUser, moderatorUser, reason, d
   if (applying && durationSeconds) {
     const expirationValue = buildDiscordTimestampValue(durationSeconds);
     if (expirationValue) {
-      fields.push({ name: 'Tempo', value: formatDuration(durationSeconds), inline: true });
+      fields.push({ name: 'Tempo', value: formatDuration(durationSeconds), inline: false });
       fields.push({ name: 'Expira em', value: expirationValue, inline: true });
     }
   }

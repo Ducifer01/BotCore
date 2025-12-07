@@ -134,7 +134,7 @@ function buildLogEmbed({ type, action, targetUser, moderatorUser, reason, guild,
   if (type === COMMAND_TYPES.CASTIGO && action !== 'REMOVE' && durationSeconds) {
     const expirationValue = buildDiscordTimestampValue(durationSeconds);
     if (expirationValue) {
-      fields.push({ name: 'Tempo', value: formatDuration(durationSeconds), inline: true });
+      fields.push({ name: 'Tempo', value: formatDuration(durationSeconds), inline: false });
       fields.push({ name: 'Expira em', value: expirationValue, inline: true });
     }
   }
