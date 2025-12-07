@@ -1,6 +1,6 @@
 const { getPrisma } = require('../db');
 const { isGuildAllowed } = require('../config');
-const { buildMuteLogEmbed } = require('../lib/mute');
+const { buildMuteLogEmbed, buildMuteExpirationEmbed } = require('../lib/mute');
 const { sendLogMessage } = require('../lib/moderation');
 
 const CHECK_INTERVAL_MS = 15000;
@@ -134,6 +134,12 @@ async function releaseVoiceMute(client, entry, cfg) {
     });
     await sendLogMessage(guild, cfg.muteVoiceLogChannelId, embed);
   }
+  await notifyMuteExpiration(client, entry.commandChannelId, buildMuteExpirationEmbed({
+    scope: 'voice',
+    targetUser: member.user,
+    reason: entry.reason || 'Tempo expirado',
+    guild,
+  }));
 }
 
 async function releaseChatMute(client, entry, cfg) {
@@ -155,6 +161,12 @@ async function releaseChatMute(client, entry, cfg) {
     });
     await sendLogMessage(guild, cfg.muteChatLogChannelId, embed);
   }
+  await notifyMuteExpiration(client, entry.commandChannelId, buildMuteExpirationEmbed({
+    scope: 'chat',
+    targetUser: member.user,
+    reason: entry.reason || 'Tempo expirado',
+    guild,
+  }));
 }
 
 async function loadConfigsFor(entries) {
@@ -197,6 +209,13 @@ async function restoreActiveMutes(client) {
       await member.roles.add(cfg.muteChatRoleId, 'Reaplicando cargo de mute chat').catch(() => {});
     }
   }
+}
+
+async function notifyMuteExpiration(client, channelId, embed) {
+  if (!channelId || !embed) return;
+  const channel = await client.channels.fetch(channelId).catch(() => null);
+  if (!channel || typeof channel.isTextBased !== 'function' || !channel.isTextBased()) return;
+  await channel.send({ embeds: [embed] }).catch(() => {});
 }
 
 function delay(ms) {

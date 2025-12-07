@@ -88,6 +88,26 @@ function buildMuteLogEmbed({ scope, action, targetUser, moderatorUser, reason, d
   return embed;
 }
 
+function buildMuteExpirationEmbed({ scope, targetUser, reason, guild }) {
+  const embed = new EmbedBuilder();
+  const isVoice = scope === 'voice';
+  embed
+    .setTitle(`${isVoice ? 'Mute de Voz' : 'Mute de Chat'} expirado`)
+    .setColor(0x57f287)
+    .setTimestamp(new Date());
+
+  const fields = [
+    { name: 'Membro', value: formatUserField(targetUser), inline: true },
+    { name: 'Motivo original', value: '```' + (reason || DEFAULT_REASON) + '```' },
+  ];
+
+  embed.addFields(fields);
+  if (guild?.name) {
+    embed.setFooter({ text: guild.name });
+  }
+  return embed;
+}
+
 function formatUserField(user, fallback = 'Desconhecido') {
   if (!user) return fallback;
   const base = user.tag || `${user.username || fallback}${user.discriminator ? `#${user.discriminator}` : ''}`;
@@ -104,4 +124,5 @@ module.exports = {
   memberHasMutePermission,
   sanitizeReason,
   buildMuteLogEmbed,
+  buildMuteExpirationEmbed,
 };

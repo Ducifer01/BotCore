@@ -124,6 +124,7 @@ Uso:
 	- Remove cargos/mutes aplicados manualmente se não houver registro correspondente.
 	- Após reiniciar o bot, todos os mutes ativos são restaurados (cargo + estado de voz).
 	- Um job periódico verifica expirações e remove mutes vencidos, registrando o log com o bot como executor.
+	- Assim que o tempo termina, o bot envia um embed verde no mesmo canal onde o comando foi digitado avisando que o usuário foi liberado automaticamente.
 
 ## Notas
 - Ao iniciar, o bot tenta sincronizar os comandos na guild definida por `DEV_GUILD_ID`. Se não encontrar a guild e `SYNC_GLOBAL_FALLBACK=true`, faz fallback para sincronização global (pode levar até ~1h para aparecer).

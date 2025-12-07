@@ -1,3 +1,4 @@
+const { EmbedBuilder } = require('discord.js');
 const { buildMuteLogEmbed, MUTE_COMMANDS, parseDurationToken, memberHasMutePermission, sanitizeReason } = require('../lib/mute');
 const { getGlobalConfig, ensureGlobalConfig } = require('../services/globalConfig');
 const { sendLogMessage, checkHierarchy } = require('../lib/moderation');
@@ -5,6 +6,7 @@ const { sendLogMessage, checkHierarchy } = require('../lib/moderation');
 const PREFIX = '!';
 const TEMP_MESSAGE_TTL = 10000;
 const EMBED_TTL = 5000;
+const PERMISSION_ERROR_COLOR = 0xed4245;
 
 class CommandUsageError extends Error {
   constructor(message) {
@@ -87,7 +89,15 @@ async function handleMutecall({ message, args, prisma, cfg, posseId }) {
     throw new CommandUsageError('O usuário precisa estar em um canal de voz.');
   }
 
-  await upsertVoiceMute(prisma, cfg.id, message.guild.id, member.id, message.author.id, reason, durationSeconds);
+  await upsertVoiceMute(prisma, {
+    globalConfigId: cfg.id,
+    guildId: message.guild.id,
+    userId: member.id,
+    moderatorId: message.author.id,
+    reason,
+    durationSeconds,
+    commandChannelId: message.channel.id,
+  });
   await member.voice.setMute(true, reason).catch(() => {
     throw new Error('Não consegui aplicar o mute de voz. Verifique minhas permissões.');
   });
@@ -163,7 +173,15 @@ async function handleMute({ message, args, prisma, cfg, posseId }) {
   const member = await fetchGuildMember(message.guild, targetId);
   ensureHierarchy(message.member, member, message.guild.members.me);
 
-  await upsertChatMute(prisma, cfg.id, message.guild.id, member.id, message.author.id, reason, durationSeconds);
+  await upsertChatMute(prisma, {
+    globalConfigId: cfg.id,
+    guildId: message.guild.id,
+    userId: member.id,
+    moderatorId: message.author.id,
+    reason,
+    durationSeconds,
+    commandChannelId: message.channel.id,
+  });
   await applyRoleIfNeeded(member, cfg.muteChatRoleId, 'Mute de chat aplicado');
 
   const embed = buildMuteLogEmbed({
@@ -213,34 +231,34 @@ async function handleUnmute({ message, args, prisma, cfg, posseId }) {
   await sendLogMessage(message.guild, cfg.muteChatLogChannelId, embed);
 }
 
-async function upsertVoiceMute(prisma, globalConfigId, guildId, userId, moderatorId, reason, durationSeconds) {
+async function upsertVoiceMute(prisma, { globalConfigId, guildId, userId, moderatorId, reason, durationSeconds, commandChannelId }) {
   const expiresAt = durationSeconds ? new Date(Date.now() + durationSeconds * 1000) : null;
   const existing = await prisma.voiceMute.findFirst({ where: { guildId, userId, endedAt: null } });
   if (existing) {
     await prisma.voiceMute.update({
       where: { id: existing.id },
-      data: { moderatorId, reason, durationSeconds, expiresAt, endedAt: null },
+      data: { moderatorId, reason, durationSeconds, expiresAt, commandChannelId, endedAt: null },
     });
     return existing.id;
   }
   const created = await prisma.voiceMute.create({
-    data: { globalConfigId, guildId, userId, moderatorId, reason, durationSeconds, expiresAt },
+    data: { globalConfigId, guildId, userId, moderatorId, reason, durationSeconds, expiresAt, commandChannelId },
   });
   return created.id;
 }
 
-async function upsertChatMute(prisma, globalConfigId, guildId, userId, moderatorId, reason, durationSeconds) {
+async function upsertChatMute(prisma, { globalConfigId, guildId, userId, moderatorId, reason, durationSeconds, commandChannelId }) {
   const expiresAt = durationSeconds ? new Date(Date.now() + durationSeconds * 1000) : null;
   const existing = await prisma.chatMute.findFirst({ where: { guildId, userId, endedAt: null } });
   if (existing) {
     await prisma.chatMute.update({
       where: { id: existing.id },
-      data: { moderatorId, reason, durationSeconds, expiresAt, endedAt: null },
+      data: { moderatorId, reason, durationSeconds, expiresAt, commandChannelId, endedAt: null },
     });
     return existing.id;
   }
   const created = await prisma.chatMute.create({
-    data: { globalConfigId, guildId, userId, moderatorId, reason, durationSeconds, expiresAt },
+    data: { globalConfigId, guildId, userId, moderatorId, reason, durationSeconds, expiresAt, commandChannelId },
   });
   return created.id;
 }
@@ -265,7 +283,16 @@ async function deleteCommandMessage(message) {
 }
 
 async function handleError(channel, err) {
-  const content = err instanceof CommandUsageError || err instanceof PermissionError
+  if (err instanceof PermissionError) {
+    const embed = new EmbedBuilder()
+      .setTitle('Permissão insuficiente')
+      .setDescription(err.message)
+      .setColor(PERMISSION_ERROR_COLOR)
+      .setTimestamp(new Date());
+    await sendEphemeralEmbed(channel, embed);
+    return;
+  }
+  const content = err instanceof CommandUsageError
     ? err.message
     : err?.message || 'Erro inesperado.';
   await sendTemporaryMessage(channel, content);
