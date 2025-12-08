@@ -36,6 +36,28 @@ async function ensureInteractionAck(interaction) {
   }
 }
 
+async function updateVipPanel(interaction, payload) {
+  if (!interaction) return;
+  await ensureInteractionAck(interaction);
+  await interaction.editReply(payload).catch(() => {});
+}
+
+function cloneComponentRows(rows = []) {
+  return rows.map((row) => ActionRowBuilder.from(row));
+}
+
+function buildNoticePayload(interaction, message, { isError = false, includeExisting = true, keepComponents = true } = {}) {
+  const embeds = [buildInfoEmbed(message, isError)];
+  if (includeExisting && interaction?.message?.embeds?.length) {
+    const existing = interaction.message.embeds.slice(0, 9).map((embed) => EmbedBuilder.from(embed));
+    embeds.push(...existing);
+  }
+  return {
+    embeds: embeds.slice(0, 10),
+    components: keepComponents ? cloneComponentRows(interaction?.message?.components || []) : [],
+  };
+}
+
 async function ensureMemberHasTag(guild, membership, roleId) {
   if (!roleId) return;
   try {
@@ -164,7 +186,17 @@ function buildVipHomePayload(user, membership) {
   return { embeds: [embed], components: [row] };
 }
 
-function buildVipTagView(membership) {
+function formatVipTagEmoji(tag) {
+  if (tag?.iconHash && tag?.emoji) {
+    return `<:${tag.emoji}:${tag.iconHash}>`;
+  }
+  if (tag?.emoji) {
+    return `:${tag.emoji}:`;
+  }
+  return 'Nenhum emoji configurado.';
+}
+
+function buildVipTagView(membership, { status, isError } = {}) {
   const hasTag = Boolean(membership.tag?.roleId);
   const lines = [];
   if (membership.tag?.roleId) {
@@ -176,11 +208,17 @@ function buildVipTagView(membership) {
   if (membership.tag?.color) {
     lines.push(`• Cor: ${membership.tag.color}`);
   }
+  const emojiValue = formatVipTagEmoji(membership.tag);
   const embed = new EmbedBuilder()
     .setTitle('Editar tag')
-    .setColor(0xffffff)
+    .setColor(isError ? ERROR_COLOR : 0xffffff)
     .setDescription(lines.length ? lines.join('\n') : 'Nenhuma tag criada.')
+    .addFields({ name: 'Emoji', value: emojiValue, inline: true })
     .setFooter({ text: membership.tag?.roleId ? 'Tag ativa' : 'Crie sua tag para começar' });
+
+  if (status) {
+    embed.addFields({ name: isError ? 'Erro' : 'Status', value: status, inline: false });
+  }
 
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('viptag:create').setLabel('Criar tag').setEmoji('🆕').setStyle(ButtonStyle.Success).setDisabled(hasTag),
@@ -193,17 +231,33 @@ function buildVipTagView(membership) {
   return { embeds: [embed], components: [row] };
 }
 
-function buildVipChannelView(membership) {
+function formatVipChannelLimit(value) {
+  if (value === null || value === undefined) return 'Ilimitado';
+  if (Number(value) === 0) return 'Ilimitado';
+  return `${value}`;
+}
+
+function buildVipChannelView(membership, { status, isError } = {}) {
   const hasChannel = Boolean(membership.channel?.channelId);
+  const description = hasChannel
+    ? [
+        `• Canal: <#${membership.channel.channelId}>`,
+        membership.channel.name ? `• Nome: ${membership.channel.name}` : null,
+        `• Limite: ${formatVipChannelLimit(membership.channel.userLimit)}`,
+      ]
+        .filter(Boolean)
+        .join('\n')
+    : 'Nenhum canal criado.';
+
   const embed = new EmbedBuilder()
     .setTitle('Editar canal VIP')
-    .setColor(0xffffff)
-    .setDescription(
-      hasChannel
-        ? [`• Canal: <#${membership.channel.channelId}>`, membership.channel.name ? `• Nome: ${membership.channel.name}` : null, membership.channel.userLimit ? `• Limite: ${membership.channel.userLimit}` : '• Limite: Ilimitado'].filter(Boolean).join('\n')
-        : 'Nenhum canal criado.',
-    )
+    .setColor(isError ? ERROR_COLOR : 0xffffff)
+    .setDescription(description)
     .setFooter({ text: hasChannel ? 'Canal pronto' : 'Crie seu canal para começar' });
+
+  if (status) {
+    embed.addFields({ name: isError ? 'Erro' : 'Status', value: status, inline: false });
+  }
 
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('vipchan:create').setLabel('Criar canal').setEmoji('🆕').setStyle(ButtonStyle.Success).setDisabled(hasChannel),
@@ -216,14 +270,182 @@ function buildVipChannelView(membership) {
   return { embeds: [embed], components: [row] };
 }
 
-async function refreshTagView(interaction, membership) {
-  if (!interaction?.message) return;
-  await interaction.message.edit(buildVipTagView(membership)).catch(() => {});
+function buildVipChannelPromptPayload(membership, { promptKey, title, instructions, status, isError } = {}) {
+  const embed = new EmbedBuilder()
+    .setTitle(title)
+    .setColor(isError ? ERROR_COLOR : 0xffffff)
+    .setDescription(`${instructions}\n\nDigite sua resposta neste chat. Para cancelar, escreva **cancelar** ou use o botão abaixo.`)
+    .addFields(
+      { name: 'Canal', value: membership.channel?.channelId ? `<#${membership.channel.channelId}>` : 'Nenhum canal criado.', inline: true },
+      { name: 'Nome atual', value: membership.channel?.name || '—', inline: true },
+      { name: 'Limite atual', value: formatVipChannelLimit(membership.channel?.userLimit), inline: true },
+    )
+    .setFooter({ text: 'Entrada expira em 2 minutos' })
+    .setTimestamp(new Date());
+
+  if (status) {
+    embed.addFields({ name: isError ? 'Erro' : 'Status', value: status, inline: false });
+  }
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`vipchan:cancel:${promptKey}`).setLabel('Cancelar').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
+  );
+
+  return { embeds: [embed], components: [row] };
 }
 
-async function refreshChannelView(interaction, membership) {
-  if (!interaction?.message) return;
-  await interaction.message.edit(buildVipChannelView(membership)).catch(() => {});
+async function promptVipChannelInput(interaction, membership, { promptKey, title, instructions, onSubmit }) {
+  if (!interaction.channel) {
+    await updateVipPanel(interaction, buildNoticePayload(interaction, 'Abra este painel em um canal de texto para enviar respostas.', { isError: true, includeExisting: false }));
+    return;
+  }
+  const render = (state = {}) =>
+    buildVipChannelPromptPayload(membership, {
+      promptKey,
+      title,
+      instructions,
+      status: state.status,
+      isError: state.isError,
+    });
+
+  await updateVipPanel(interaction, render());
+  const key = getPromptKey(interaction.user.id, promptKey, interaction.guildId);
+  const filter = (msg) => msg.author.id === interaction.user.id && msg.channelId === interaction.channelId;
+  const collector = interaction.channel.createMessageCollector({ filter, time: INPUT_TIMEOUT });
+  registerCollector(key, collector);
+
+  collector.on('collect', async (msg) => {
+    try {
+      const content = (msg.content || '').trim();
+      if (!content) return;
+      if (content.toLowerCase() === 'cancelar') {
+        collector.stop('cancelled');
+        await refreshChannelView(interaction, membership, { status: 'Operação cancelada.', isError: true });
+        return;
+      }
+      try {
+        const result = await onSubmit(content);
+        collector.stop('handled');
+        const successMessage = typeof result === 'string' ? result : result?.status;
+        await refreshChannelView(interaction, membership, successMessage ? { status: successMessage } : undefined);
+        return;
+      } catch (err) {
+        await updateVipPanel(
+          interaction,
+          render({ status: err.message || 'Não foi possível processar sua resposta.', isError: true }),
+        );
+      }
+      collector.resetTimer();
+    } finally {
+      await msg.delete().catch(() => {});
+    }
+  });
+
+  collector.on('end', async (_, reason) => {
+    if (['handled', 'cancelled', 'replaced'].includes(reason)) return;
+    await refreshChannelView(interaction, membership, { status: 'Tempo esgotado para responder.', isError: true });
+  });
+}
+
+function buildVipTagPromptPayload(membership, { promptKey, title, instructions, status, isError } = {}) {
+  const embed = new EmbedBuilder()
+    .setTitle(title)
+    .setColor(isError ? ERROR_COLOR : 0xffffff)
+    .setDescription(`${instructions}\n\nDigite sua resposta neste chat. Para cancelar, escreva **cancelar** ou use o botão abaixo.`)
+    .addFields(
+      { name: 'Cargo', value: membership.tag?.roleId ? `<@&${membership.tag.roleId}>` : 'Nenhuma tag criada.', inline: true },
+      { name: 'Nome atual', value: membership.tag?.name || '—', inline: true },
+      { name: 'Cor atual', value: membership.tag?.color || '—', inline: true },
+      { name: 'Emoji', value: formatVipTagEmoji(membership.tag), inline: true },
+    )
+    .setFooter({ text: 'Entrada expira em 2 minutos' })
+    .setTimestamp(new Date());
+
+  if (status) {
+    embed.addFields({ name: isError ? 'Erro' : 'Status', value: status, inline: false });
+  }
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`viptag:cancel:${promptKey}`).setLabel('Cancelar').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
+  );
+
+  return { embeds: [embed], components: [row] };
+}
+
+function stopPrompt(interaction, actionKey, reason = 'cancelled') {
+  if (!interaction) return;
+  const key = getPromptKey(interaction.user.id, actionKey, interaction.guildId);
+  const collector = promptCollectors.get(key);
+  if (collector) {
+    try {
+      collector.stop(reason);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+async function promptVipTagInput(interaction, membership, { promptKey, title, instructions, onSubmit }) {
+  if (!interaction.channel) {
+    await updateVipPanel(interaction, buildNoticePayload(interaction, 'Abra este painel em um canal de texto para enviar respostas.', { isError: true, includeExisting: false }));
+    return;
+  }
+  const render = (state = {}) =>
+    buildVipTagPromptPayload(membership, {
+      promptKey,
+      title,
+      instructions,
+      status: state.status,
+      isError: state.isError,
+    });
+
+  await updateVipPanel(interaction, render());
+  const key = getPromptKey(interaction.user.id, promptKey, interaction.guildId);
+  const filter = (msg) => msg.author.id === interaction.user.id && msg.channelId === interaction.channelId;
+  const collector = interaction.channel.createMessageCollector({ filter, time: INPUT_TIMEOUT });
+  registerCollector(key, collector);
+
+  collector.on('collect', async (msg) => {
+    try {
+      const content = (msg.content || '').trim();
+      if (!content) return;
+      if (content.toLowerCase() === 'cancelar') {
+        collector.stop('cancelled');
+        await refreshTagView(interaction, membership, { status: 'Operação cancelada.', isError: true });
+        return;
+      }
+      try {
+        const result = await onSubmit(content);
+        collector.stop('handled');
+        const successMessage = typeof result === 'string' ? result : result?.status;
+        await refreshTagView(interaction, membership, successMessage ? { status: successMessage } : undefined);
+        return;
+      } catch (err) {
+        await updateVipPanel(
+          interaction,
+          render({ status: err.message || 'Não foi possível processar sua resposta.', isError: true }),
+        );
+      }
+      collector.resetTimer();
+    } finally {
+      await msg.delete().catch(() => {});
+    }
+  });
+
+  collector.on('end', async (_, reason) => {
+    if (['handled', 'cancelled', 'replaced'].includes(reason)) return;
+    await refreshTagView(interaction, membership, { status: 'Tempo esgotado para responder.', isError: true });
+  });
+}
+
+async function refreshTagView(interaction, membership, options) {
+  if (!interaction) return;
+  await updateVipPanel(interaction, buildVipTagView(membership, options));
+}
+
+async function refreshChannelView(interaction, membership, options) {
+  if (!interaction) return;
+  await updateVipPanel(interaction, buildVipChannelView(membership, options));
 }
 
 function buildInfoEmbed(message, isError = false) {
@@ -266,7 +488,7 @@ function registerCollector(key, collector) {
 
 async function promptText(interaction, action, question, handler) {
   if (!interaction.channel) {
-    await interaction.reply({ content: 'Abra este painel em um canal de texto para enviar respostas.', ephemeral: true });
+    await updateVipPanel(interaction, buildNoticePayload(interaction, 'Abra este painel em um canal de texto para enviar respostas.', { isError: true, includeExisting: false }));
     return;
   }
   await ensureInteractionAck(interaction);
@@ -497,12 +719,12 @@ async function handleSetVip(interaction, ctx) {
     ? vipCfg.setPermissions.some((perm) => interaction.member.roles.cache.has(perm.roleId))
     : interaction.member.permissions.has('ManageGuild');
   if (!hasPermission) {
-    await interaction.reply({ embeds: [buildInfoEmbed('Você não pode usar este botão.', true)], ephemeral: true });
+    await updateVipPanel(interaction, buildNoticePayload(interaction, 'Você não pode usar este botão.', { isError: true }));
     return;
   }
   const targetMember = await interaction.guild.members.fetch(userId).catch(() => null);
   if (!targetMember) {
-    await interaction.reply({ embeds: [buildInfoEmbed('Usuário não encontrado.', true)], ephemeral: true });
+    await updateVipPanel(interaction, buildNoticePayload(interaction, 'Usuário não encontrado.', { isError: true }));
     return;
   }
   try {
@@ -519,9 +741,15 @@ async function handleSetVip(interaction, ctx) {
     if (vipCfg.bonusRoleId) {
       await targetMember.roles.add(vipCfg.bonusRoleId).catch(() => {});
     }
-    await interaction.reply({ embeds: [buildInfoEmbed(`${targetMember} recebeu o VIP ${membership.plan?.name || planId}.`)], ephemeral: true });
+    await updateVipPanel(
+      interaction,
+      buildNoticePayload(interaction, `${targetMember} recebeu o VIP ${membership.plan?.name || planId}.`, {
+        includeExisting: false,
+        keepComponents: false,
+      }),
+    );
   } catch (err) {
-    await interaction.reply({ embeds: [buildInfoEmbed(`Erro: ${err.message}`, true)], ephemeral: true });
+    await updateVipPanel(interaction, buildNoticePayload(interaction, `Erro: ${err.message}`, { isError: true }));
   }
 }
 
@@ -529,66 +757,76 @@ async function handleVipUser(interaction, ctx) {
   const prisma = ctx.getPrisma();
   const membership = await getMembershipByUser(interaction.user.id, prisma);
   if (!membership || !membership.active || membership.guildId !== interaction.guildId) {
-    await interaction.reply({ embeds: [buildInfoEmbed('VIP não encontrado.', true)], ephemeral: true });
+    await updateVipPanel(interaction, buildNoticePayload(interaction, 'VIP não encontrado.', { isError: true, includeExisting: false, keepComponents: false }));
     return;
   }
   if (interaction.customId === 'vipuser:close') {
-    await interaction.update({ components: [], embeds: [] }).catch(() => {});
+    await updateVipPanel(interaction, { components: [], embeds: [] });
     return;
   }
   if (interaction.customId === 'vipuser:back') {
     const payload = buildVipHomePayload(interaction.user, membership);
-    await interaction.update(payload).catch(() => {});
+    await updateVipPanel(interaction, payload);
     return;
   }
   if (interaction.customId === 'vipuser:tag') {
-    await interaction.update(buildVipTagView(membership));
+    await updateVipPanel(interaction, buildVipTagView(membership));
     return;
   }
   if (interaction.customId === 'vipuser:channel') {
-    await interaction.update(buildVipChannelView(membership));
+    await updateVipPanel(interaction, buildVipChannelView(membership));
     return;
   }
   // fallback: rebuild painel principal
   const payload = buildVipHomePayload(interaction.user, membership);
-  await interaction.update(payload).catch(() => {});
+  await updateVipPanel(interaction, payload);
 }
 
 async function handleVipTag(interaction, ctx) {
   const prisma = ctx.getPrisma();
   let membership = await getMembershipByUser(interaction.user.id, prisma);
   if (!membership || !membership.active || membership.guildId !== interaction.guildId) {
-    await interaction.reply({ embeds: [buildInfoEmbed('VIP não encontrado.', true)], ephemeral: true });
+    await updateVipPanel(interaction, buildNoticePayload(interaction, 'VIP não encontrado.', { isError: true, includeExisting: false, keepComponents: false }));
     return;
   }
-  const [, action] = interaction.customId.split(':');
+  const parts = interaction.customId.split(':');
+  const action = parts[1];
+  const targetKey = parts[2];
   if (action === 'back') {
+    stopPrompt(interaction, 'viptag-name');
+    stopPrompt(interaction, 'viptag-color');
+    stopPrompt(interaction, 'viptag-emoji');
     const payload = buildVipHomePayload(interaction.user, membership);
-    await interaction.update(payload).catch(() => {});
+    await updateVipPanel(interaction, payload);
     return;
   }
-    await ensureInteractionAck(interaction);
+  if (action === 'cancel') {
+    if (targetKey) {
+      stopPrompt(interaction, targetKey);
+    }
+    await refreshTagView(interaction, membership, { status: 'Operação cancelada.' });
+    return;
+  }
+  await ensureInteractionAck(interaction);
   const persistTag = async (data) => {
     const record = await saveVipTag(membership.id, data, prisma);
     membership.tag = record;
-    await refreshTagView(interaction, membership);
   };
+  const showError = async (message) => refreshTagView(interaction, membership, { status: message, isError: true });
 
   if (action === 'create') {
     try {
       if (membership.tag?.roleId) {
         const existing = interaction.guild.roles.cache.get(membership.tag.roleId) || (await interaction.guild.roles.fetch(membership.tag.roleId).catch(() => null));
         if (existing) {
-          await interaction.followUp({ embeds: [buildInfoEmbed(`Você já possui uma tag: <@&${existing.id}>.`)], ephemeral: true });
-          await refreshTagView(interaction, membership);
+          await refreshTagView(interaction, membership, { status: `Você já possui uma tag: <@&${existing.id}>.`, isError: true });
           return;
         }
       }
       const { role } = await ensureVipTagRole(interaction, membership, prisma, { createIfMissing: true });
-      await interaction.followUp({ embeds: [buildInfoEmbed(`Tag criada com sucesso: <@&${role.id}>.`)], ephemeral: true });
-      await refreshTagView(interaction, membership);
+      await refreshTagView(interaction, membership, { status: `Tag criada com sucesso: <@&${role.id}>.` });
     } catch (err) {
-      await interaction.followUp({ embeds: [buildInfoEmbed(err.message || 'Não foi possível criar a tag.', true)], ephemeral: true }).catch(() => {});
+      await refreshTagView(interaction, membership, { status: err.message || 'Não foi possível criar a tag.', isError: true });
     }
     return;
   }
@@ -598,52 +836,67 @@ async function handleVipTag(interaction, ctx) {
       const { role } = await ensureVipTagRole(interaction, membership, prisma);
       await handler(role);
     } catch (err) {
-      await interaction.followUp({ embeds: [buildInfoEmbed(err.message || 'Não foi possível acessar a tag.', true)], ephemeral: true }).catch(() => {});
+      await showError(err.message || 'Não foi possível acessar a tag.');
     }
   };
 
   if (action === 'name') {
     await useTagRole(async (role) => {
-      await promptText(interaction, 'viptag-name', 'Digite o novo nome da tag. Para cancelar, escreva **cancelar**.', async (value) => {
-        if (value.length < 2 || value.length > 32) {
-          throw new Error('O nome deve ter entre 2 e 32 caracteres.');
-        }
-        await role.setName(value).catch(() => {
-          throw new Error('Não consegui atualizar o nome da tag.');
-        });
-        await persistTag({ name: value });
-        await interaction.followUp({ embeds: [buildInfoEmbed('Nome da tag atualizado.')], ephemeral: true });
+      await promptVipTagInput(interaction, membership, {
+        promptKey: 'viptag-name',
+        title: 'Editar nome da tag',
+        instructions: 'Digite o novo nome da tag (2 a 32 caracteres).',
+        onSubmit: async (value) => {
+          if (value.length < 2 || value.length > 32) {
+            throw new Error('O nome deve ter entre 2 e 32 caracteres.');
+          }
+          await role.setName(value).catch(() => {
+            throw new Error('Não consegui atualizar o nome da tag.');
+          });
+          await persistTag({ name: value });
+          return 'Nome da tag atualizado.';
+        },
       });
     });
     return;
   }
   if (action === 'color') {
     await useTagRole(async (role) => {
-      await promptText(interaction, 'viptag-color', 'Envie uma cor em HEX (ex: #FF0000).', async (value) => {
-        const hex = parseHexColor(value);
-        await role.setColor(hex).catch(() => {
-          throw new Error('Não consegui aplicar a cor.');
-        });
-        await persistTag({ color: hex });
-        await interaction.followUp({ embeds: [buildInfoEmbed('Cor da tag atualizada.')], ephemeral: true });
+      await promptVipTagInput(interaction, membership, {
+        promptKey: 'viptag-color',
+        title: 'Editar cor da tag',
+        instructions: 'Envie uma cor em HEX (ex: #FF0000).',
+        onSubmit: async (value) => {
+          const hex = parseHexColor(value);
+          await role.setColor(hex).catch(() => {
+            throw new Error('Não consegui aplicar a cor.');
+          });
+          await persistTag({ color: hex });
+          return 'Cor da tag atualizada.';
+        },
       });
     });
     return;
   }
   if (action === 'emoji') {
     await useTagRole(async (role) => {
-      await promptText(interaction, 'viptag-emoji', 'Envie um emoji no formato <:nome:id>.', async (value) => {
-        const emojiData = await resolveEmojiAsset(value);
-        if (!emojiData) {
-          throw new Error('Formato inválido. Use <:nome:id>.');
-        }
-        try {
-          await role.setIcon(emojiData.buffer);
-        } catch (err) {
-          throw new Error('Não foi possível aplicar o emoji (verifique se o servidor permite ícones em cargos).');
-        }
-        await persistTag({ emoji: emojiData.name, iconHash: emojiData.id, iconData: emojiData.buffer });
-        await interaction.followUp({ embeds: [buildInfoEmbed('Emoji aplicado à tag.')], ephemeral: true });
+      await promptVipTagInput(interaction, membership, {
+        promptKey: 'viptag-emoji',
+        title: 'Editar emoji da tag',
+        instructions: 'Envie um emoji estático no formato <:nome:id>.',
+        onSubmit: async (value) => {
+          const emojiData = await resolveEmojiAsset(value);
+          if (!emojiData) {
+            throw new Error('Formato inválido. Use <:nome:id>.');
+          }
+          try {
+            await role.setIcon(emojiData.buffer);
+          } catch (err) {
+            throw new Error('Não foi possível aplicar o emoji (verifique se o servidor permite ícones em cargos).');
+          }
+          await persistTag({ emoji: emojiData.name, iconHash: emojiData.id, iconData: emojiData.buffer });
+          return 'Emoji aplicado à tag.';
+        },
       });
     });
     return;
@@ -654,94 +907,137 @@ async function handleVipChannel(interaction, ctx) {
   const prisma = ctx.getPrisma();
   let membership = await getMembershipByUser(interaction.user.id, prisma);
   if (!membership || !membership.active || membership.guildId !== interaction.guildId) {
-    await interaction.reply({ embeds: [buildInfoEmbed('VIP não encontrado.', true)], ephemeral: true });
+    await updateVipPanel(interaction, buildNoticePayload(interaction, 'VIP não encontrado.', { isError: true, includeExisting: false, keepComponents: false }));
     return;
   }
-  const [, action] = interaction.customId.split(':');
+  const parts = interaction.customId.split(':');
+  const action = parts[1];
+  const promptKey = parts[2];
+
+  const stopChannelPrompts = () => {
+    stopPrompt(interaction, 'vipchan-name');
+    stopPrompt(interaction, 'vipchan-limit');
+  };
+
+  if (!['name', 'limit'].includes(action)) {
+    stopChannelPrompts();
+  }
+
   if (action === 'back') {
+    stopChannelPrompts();
     const payload = buildVipHomePayload(interaction.user, membership);
-    await interaction.update(payload).catch(() => {});
+    await updateVipPanel(interaction, payload);
     return;
   }
+
+  if (action === 'cancel') {
+    if (promptKey) {
+      stopPrompt(interaction, promptKey);
+    }
+    await refreshChannelView(interaction, membership, { status: 'Operação cancelada.' });
+    return;
+  }
+
   await ensureInteractionAck(interaction);
+
   const persistChannel = async (data) => {
     const record = await saveVipChannel(membership.id, data, prisma);
     membership.channel = record;
-    await refreshChannelView(interaction, membership);
   };
+
+  const showChannelError = async (message) => refreshChannelView(interaction, membership, { status: message, isError: true });
+
+  const useVipChannel = async (handler) => {
+    try {
+      const { channel } = await ensureVipChannel(interaction, membership, prisma);
+      await handler(channel);
+    } catch (err) {
+      await showChannelError(err.message || 'Não foi possível acessar o canal.');
+    }
+  };
+
   if (action === 'fix') {
     try {
       const { channel } = await ensureVipChannel(interaction, membership, prisma);
       await applyBaseChannelPermissions(channel, membership);
       await syncChannelShares(channel, membership);
-      await interaction.followUp({ embeds: [buildInfoEmbed('Canal verificado e sincronizado.')], ephemeral: true });
-      await refreshChannelView(interaction, membership);
+      await refreshChannelView(interaction, membership, { status: 'Canal verificado e sincronizado.' });
     } catch (err) {
-      await interaction.followUp({ embeds: [buildInfoEmbed(err.message || 'Não foi possível verificar o canal.', true)], ephemeral: true }).catch(() => {});
+      await showChannelError(err.message || 'Não foi possível verificar o canal.');
     }
     return;
   }
+
   if (action === 'create') {
     try {
       const existingChannel = membership.channel?.channelId
         ? interaction.guild.channels.cache.get(membership.channel.channelId) || (await interaction.guild.channels.fetch(membership.channel.channelId).catch(() => null))
         : null;
       if (existingChannel) {
-        await interaction.followUp({ embeds: [buildInfoEmbed(`Você já possui um canal: ${existingChannel}.`)], ephemeral: true });
-        await refreshChannelView(interaction, membership);
+        await refreshChannelView(interaction, membership, { status: `Você já possui um canal: ${existingChannel}.`, isError: true });
         return;
       }
       const { channel } = await ensureVipChannel(interaction, membership, prisma, { createIfMissing: true });
-      await interaction.followUp({ embeds: [buildInfoEmbed(`Canal criado com sucesso: ${channel}.`)], ephemeral: true });
-      await refreshChannelView(interaction, membership);
+      await refreshChannelView(interaction, membership, { status: `Canal criado com sucesso: ${channel}.` });
     } catch (err) {
-      await interaction.followUp({ embeds: [buildInfoEmbed(err.message || 'Não foi possível criar o canal.', true)], ephemeral: true }).catch(() => {});
+      await showChannelError(err.message || 'Não foi possível criar o canal.');
     }
     return;
   }
+
   if (action === 'name') {
-    try {
-      const { channel } = await ensureVipChannel(interaction, membership, prisma);
-      await promptText(interaction, 'vipchan-name', 'Digite o novo nome do canal.', async (value) => {
-        const safeName = value.slice(0, 32);
-        await channel.setName(safeName).catch(() => {
-          throw new Error('Não consegui renomear o canal.');
-        });
-        await persistChannel({
-          channelId: channel.id,
-          name: safeName,
-          userLimit: channel.userLimit ?? null,
-          categoryId: channel.parentId || null,
-        });
-        await interaction.followUp({ embeds: [buildInfoEmbed('Nome do canal atualizado.')], ephemeral: true });
+    stopPrompt(interaction, 'vipchan-limit');
+    await useVipChannel(async (channel) => {
+      await promptVipChannelInput(interaction, membership, {
+        promptKey: 'vipchan-name',
+        title: 'Editar nome do canal',
+        instructions: 'Digite o novo nome do canal (máximo de 32 caracteres).',
+        onSubmit: async (value) => {
+          const safeName = value.slice(0, 32);
+          if (!safeName.trim()) {
+            throw new Error('O nome não pode ficar vazio.');
+          }
+          await channel.setName(safeName).catch(() => {
+            throw new Error('Não consegui renomear o canal.');
+          });
+          await persistChannel({
+            channelId: channel.id,
+            name: safeName,
+            userLimit: channel.userLimit ?? null,
+            categoryId: channel.parentId || null,
+          });
+          return 'Nome do canal atualizado.';
+        },
       });
-    } catch (err) {
-      await interaction.followUp({ embeds: [buildInfoEmbed(err.message || 'Não foi possível acessar o canal.', true)], ephemeral: true }).catch(() => {});
-    }
+    });
     return;
   }
+
   if (action === 'limit') {
-    try {
-      const { channel } = await ensureVipChannel(interaction, membership, prisma);
-      await promptText(interaction, 'vipchan-limit', 'Informe o limite de usuários (0 = ilimitado, máximo 99).', async (value) => {
-        const parsed = parseInt(value, 10);
-        if (Number.isNaN(parsed) || parsed < 0 || parsed > 99) {
-          throw new Error('Informe um número entre 0 e 99.');
-        }
-        await channel.setUserLimit(parsed === 0 ? null : parsed).catch(() => {
-          throw new Error('Não consegui atualizar o limite.');
-        });
-        await persistChannel({
-          channelId: channel.id,
-          name: channel.name,
-          userLimit: parsed === 0 ? null : parsed,
-          categoryId: channel.parentId || null,
-        });
-        await interaction.followUp({ embeds: [buildInfoEmbed('Limite atualizado.')], ephemeral: true });
+    stopPrompt(interaction, 'vipchan-name');
+    await useVipChannel(async (channel) => {
+      await promptVipChannelInput(interaction, membership, {
+        promptKey: 'vipchan-limit',
+        title: 'Editar limite do canal',
+        instructions: 'Informe o limite de usuários (0 = ilimitado, máximo 99).',
+        onSubmit: async (value) => {
+          const parsed = parseInt(value, 10);
+          if (Number.isNaN(parsed) || parsed < 0 || parsed > 99) {
+            throw new Error('Informe um número entre 0 e 99.');
+          }
+          await channel.setUserLimit(parsed === 0 ? null : parsed).catch(() => {
+            throw new Error('Não consegui atualizar o limite.');
+          });
+          await persistChannel({
+            channelId: channel.id,
+            name: channel.name,
+            userLimit: parsed === 0 ? null : parsed,
+            categoryId: channel.parentId || null,
+          });
+          return 'Limite atualizado.';
+        },
       });
-    } catch (err) {
-      await interaction.followUp({ embeds: [buildInfoEmbed(err.message || 'Não foi possível acessar o canal.', true)], ephemeral: true }).catch(() => {});
-    }
+    });
   }
 }
 
@@ -782,7 +1078,7 @@ async function showVipList(interaction, ctx, page = 1) {
     new ButtonBuilder().setCustomId('vipadmin:home').setLabel('Voltar').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
   );
 
-  await interaction.update({ embeds: [embed], components: [row] });
+  await updateVipPanel(interaction, { embeds: [embed], components: [row] });
 }
 
 async function sendVipDetail(interaction, membership) {
@@ -811,7 +1107,7 @@ async function sendVipDetail(interaction, membership) {
 
 async function handleVipAdmin(interaction, ctx) {
   if (!interaction.memberPermissions?.has('Administrator')) {
-    await interaction.reply({ embeds: [buildInfoEmbed('Apenas administradores podem usar este painel.', true)], ephemeral: true });
+    await updateVipPanel(interaction, buildNoticePayload(interaction, 'Apenas administradores podem usar este painel.', { isError: true }));
     return;
   }
   const prisma = ctx.getPrisma();
@@ -819,7 +1115,7 @@ async function handleVipAdmin(interaction, ctx) {
 
   if (action === 'home') {
     const payload = buildVipAdminHomePayload();
-    await interaction.update(payload);
+    await updateVipPanel(interaction, payload);
     return;
   }
 
@@ -850,12 +1146,12 @@ async function handleVipAdmin(interaction, ctx) {
   if (action === 'adddays' || action === 'removedays') {
     const membershipId = Number(value);
     if (!membershipId) {
-      await interaction.reply({ embeds: [buildInfoEmbed('VIP inválido.', true)], ephemeral: true });
+      await updateVipPanel(interaction, buildNoticePayload(interaction, 'VIP inválido.', { isError: true }));
       return;
     }
     const membership = await prisma.vipMembership.findUnique({ where: { id: membershipId } });
     if (!membership || membership.guildId !== interaction.guildId || !membership.active) {
-      await interaction.reply({ embeds: [buildInfoEmbed('VIP não encontrado.', true)], ephemeral: true });
+      await updateVipPanel(interaction, buildNoticePayload(interaction, 'VIP não encontrado.', { isError: true }));
       return;
     }
     const promptKey = action === 'adddays' ? 'vipadmin-add' : 'vipadmin-remove';
@@ -879,7 +1175,7 @@ async function handleVipAdmin(interaction, ctx) {
   if (action === 'delete') {
     const membershipId = Number(value);
     if (!membershipId) {
-      await interaction.reply({ embeds: [buildInfoEmbed('VIP inválido.', true)], ephemeral: true });
+      await updateVipPanel(interaction, buildNoticePayload(interaction, 'VIP inválido.', { isError: true }));
       return;
     }
     const membership = await prisma.vipMembership.findUnique({
@@ -887,15 +1183,21 @@ async function handleVipAdmin(interaction, ctx) {
       include: { plan: true, tag: true, channel: true },
     });
     if (!membership || membership.guildId !== interaction.guildId || !membership.active) {
-      await interaction.reply({ embeds: [buildInfoEmbed('VIP não encontrado ou já removido.', true)], ephemeral: true });
+      await updateVipPanel(interaction, buildNoticePayload(interaction, 'VIP não encontrado ou já removido.', { isError: true }));
       return;
     }
     await cleanupMembership(interaction.guild, membership, interaction.user.id);
-    await interaction.reply({ embeds: [buildInfoEmbed('VIP removido e recursos limpos.')], ephemeral: true });
+    await updateVipPanel(
+      interaction,
+      buildNoticePayload(interaction, 'VIP removido e recursos limpos.', {
+        includeExisting: false,
+        keepComponents: false,
+      }),
+    );
     return;
   }
 
-  await interaction.reply({ embeds: [buildInfoEmbed('Ação desconhecida.', true)], ephemeral: true });
+  await updateVipPanel(interaction, buildNoticePayload(interaction, 'Ação desconhecida.', { isError: true }));
 }
 
 module.exports = {
