@@ -5,7 +5,87 @@ const { getPrisma } = require('../db');
 const webhookCache = new Map();
 const instaWebhookBlock = new Map();
 
-function buildInstaEmbed(cfg) {
+async function ensurePosse(interaction, ctx) {
+  const { POSSE_USER_ID } = ctx;
+  if (!POSSE_USER_ID || POSSE_USER_ID !== interaction.user.id) {
+    await interaction.followUp({ content: 'Apenas o usuário posse pode usar este painel.', ephemeral: true }).catch(() => {});
+    return false;
+  }
+  return true;
+}
+
+async function ensureDeferred(interaction) {
+  if (!interaction.deferred && !interaction.replied) {
+    if (typeof interaction.deferUpdate === 'function') {
+      await interaction.deferUpdate().catch(() => {});
+    }
+  }
+}
+
+async function editPanel(interaction, payload) {
+  await ensureDeferred(interaction);
+  await interaction.editReply(payload).catch(() => {});
+}
+
+async function renderHome(interaction, prisma, status) {
+  await ensureDeferred(interaction);
+  const cfg = await getGlobalConfig(prisma);
+  const payload = { embeds: [buildInstaEmbed(cfg, status)], components: buildInstaMenuRows() };
+  await interaction.editReply(payload).catch(() => {});
+  return true;
+}
+
+async function showChannelPrompt(interaction, { title, description, customId, channelTypes = [ChannelType.GuildText] }) {
+  const select = new ChannelSelectMenuBuilder()
+    .setCustomId(customId)
+    .setPlaceholder('Selecione um canal')
+    .setMinValues(1)
+    .setMaxValues(1)
+    .addChannelTypes(...channelTypes);
+  const embed = new EmbedBuilder().setTitle(title).setDescription(description).setColor(0x2c2f33);
+  const components = [new ActionRowBuilder().addComponents(select), buildBackRow()];
+  await editPanel(interaction, { embeds: [embed], components });
+  return true;
+}
+
+async function showRolePrompt(interaction, { title, description, customId, min = 1, max = 1 }) {
+  const select = new RoleSelectMenuBuilder()
+    .setCustomId(customId)
+    .setPlaceholder('Selecione cargos')
+    .setMinValues(min)
+    .setMaxValues(max);
+  const embed = new EmbedBuilder().setTitle(title).setDescription(description).setColor(0x2c2f33);
+  const components = [new ActionRowBuilder().addComponents(select), buildBackRow()];
+  await editPanel(interaction, { embeds: [embed], components });
+  return true;
+}
+
+async function showUserPrompt(interaction, { title, description, customId }) {
+  const select = new UserSelectMenuBuilder()
+    .setCustomId(customId)
+    .setPlaceholder('Selecione um usuário')
+    .setMinValues(1)
+    .setMaxValues(1);
+  const embed = new EmbedBuilder().setTitle(title).setDescription(description).setColor(0xED4245);
+  const components = [new ActionRowBuilder().addComponents(select), buildBackRow()];
+  await editPanel(interaction, { embeds: [embed], components });
+  return true;
+}
+
+async function showResetConfirm(interaction) {
+  const embed = new EmbedBuilder()
+    .setTitle('Resetar canais de Insta')
+    .setDescription('Isso vai anunciar o ganhador da semana e limpar todos os posts de InstaBoy/InstaGirl. Deseja continuar?')
+    .setColor(0xE74C3C);
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`menu:insta:reset:confirm:${interaction.user.id}`).setLabel('Sim, resetar').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('menu:insta:reset:cancel').setLabel('Cancelar').setStyle(ButtonStyle.Secondary),
+  );
+  await editPanel(interaction, { embeds: [embed], components: [row] });
+  return true;
+}
+
+function buildInstaEmbed(cfg, status) {
   const lines = [
     `• Insta Boys: ${cfg?.instaBoysChannelId ? `<#${cfg.instaBoysChannelId}>` : 'não definido'}`,
     `• Insta Girls: ${cfg?.instaGirlsChannelId ? `<#${cfg.instaGirlsChannelId}>` : 'não definido'}`,
@@ -13,10 +93,12 @@ function buildInstaEmbed(cfg) {
     `• Cargo Principal: ${cfg?.mainRoleId ? `<@&${cfg.mainRoleId}>` : 'não definido'}`,
     `• Cargo Verificado: ${cfg?.verifiedRoleId ? `<@&${cfg.verifiedRoleId}>` : 'não definido'}`,
     `• Painel Verifique-se: ${cfg?.verifyPanelChannelId ? `<#${cfg.verifyPanelChannelId}>` : 'não definido'}`,
+    `• Cargos Notificados: ${cfg?.ticketPingRolesGlobal?.length ? cfg.ticketPingRolesGlobal.map((r) => `<@&${r.roleId}>`).join(', ') : 'nenhum definido'}`,
   ].join('\n');
+  const prefix = status ? `${getStatusEmoji(status.type)} ${status.message}\n\n` : '';
   return new EmbedBuilder()
     .setTitle('Configurar Insta')
-    .setDescription(`Ajuste as configurações abaixo.\n\n${lines}`)
+    .setDescription(`${prefix}Ajuste as configurações abaixo.\n\n${lines}`)
     .setColor(0x2c2f33);
 }
 
@@ -25,16 +107,32 @@ function buildInstaMenuRows() {
     new ButtonBuilder().setCustomId('menu:back').setLabel('Voltar').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('menu:insta:boys').setLabel('InstaBoy').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('menu:insta:girls').setLabel('InstaGirl').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('menu:insta:pings').setLabel('Cargos Notificados').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('menu:insta:photos').setLabel('Canal de Fotos').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('menu:insta:verifypanel').setLabel('Painel Verifique-se').setStyle(ButtonStyle.Secondary),
   );
   const row2 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('menu:insta:mainrole').setLabel('Cargo Principal').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('menu:insta:verifiedrole').setLabel('Cargo Verificado').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('menu:insta:verifypanel').setLabel('Painel Verifique-se').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('menu:insta:pings').setLabel('Cargos Notificados').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('menu:insta:unverify').setLabel('Cancelar Verificação').setStyle(ButtonStyle.Danger),
   );
-  return [row1, row2];
+  const row3 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('menu:insta:sendpanel').setLabel('Enviar Painel').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('menu:insta:reset').setLabel('Resetar Insta').setStyle(ButtonStyle.Danger),
+  );
+  return [row1, row2, row3];
+}
+
+function buildBackRow(label = 'Voltar') {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('menu:insta:home').setLabel(label).setStyle(ButtonStyle.Secondary),
+  );
+}
+
+function getStatusEmoji(type) {
+  if (type === 'success') return '✅';
+  if (type === 'error') return '⚠️';
+  return 'ℹ️';
 }
 
 async function presentMenu(interaction, ctx) {
@@ -60,192 +158,185 @@ async function handleInteraction(interaction, ctx) {
     if (id.startsWith('insta:')) {
       return handlePostButtons(interaction);
     }
-    if (id.startsWith('reset:')) {
-      return handleReset(interaction);
-    }
   }
   return false;
 }
 
 async function handleConfigButtons(interaction, ctx) {
-  const { POSSE_USER_ID } = ctx;
-  if (!POSSE_USER_ID || POSSE_USER_ID !== interaction.user.id) {
-    await interaction.reply({ content: 'Apenas o usuário posse pode usar este comando.', ephemeral: true });
+  await ensureDeferred(interaction);
+  if (!(await ensurePosse(interaction, ctx))) {
     return true;
   }
-  const action = interaction.customId.split(':')[2];
-  let components;
+  const prisma = ctx.getPrisma();
+  const parts = interaction.customId.split(':');
+  const action = parts[2];
+  const subaction = parts[3];
+
+  if (action === 'home') {
+    return renderHome(interaction, prisma);
+  }
   if (action === 'boys' || action === 'girls') {
-    const label = action === 'boys' ? 'Definir InstaBoy' : 'Definir InstaGirl';
-    const select = new ChannelSelectMenuBuilder()
-      .setCustomId(`menu:insta:set:${action}`)
-      .setPlaceholder('Selecione um canal de texto')
-      .setMinValues(1)
-      .setMaxValues(1)
-      .addChannelTypes(ChannelType.GuildText);
-    components = [new ActionRowBuilder().addComponents(select)];
-    const embed = new EmbedBuilder().setTitle(label).setDescription('Selecione o canal para este modo.').setColor(0x2c2f33);
-    await interaction.reply({ embeds: [embed], components, ephemeral: true });
-    return true;
-  }
-  if (action === 'pings') {
-    const select = new RoleSelectMenuBuilder()
-      .setCustomId('menu:insta:pings:set')
-      .setPlaceholder('Selecione até 10 cargos')
-      .setMinValues(0)
-      .setMaxValues(10);
-    const embed = new EmbedBuilder().setTitle('Cargos Notificados').setDescription('Selecione cargos que serão mencionados ao abrir o ticket de verificação.').setColor(0x2c2f33);
-    components = [new ActionRowBuilder().addComponents(select)];
-    await interaction.reply({ embeds: [embed], components, ephemeral: true });
-    return true;
+    const isBoys = action === 'boys';
+    return showChannelPrompt(interaction, {
+      title: isBoys ? 'Definir InstaBoy' : 'Definir InstaGirl',
+      description: 'Selecione o canal de texto onde os usuários enviarão as fotos.',
+      customId: `menu:insta:select:${isBoys ? 'boys' : 'girls'}`,
+    });
   }
   if (action === 'photos') {
-    const select = new ChannelSelectMenuBuilder()
-      .setCustomId('menu:insta:photos:set')
-      .setPlaceholder('Selecione um canal de texto')
-      .setMinValues(1)
-      .setMaxValues(1)
-      .addChannelTypes(ChannelType.GuildText);
-    const embed = new EmbedBuilder().setTitle('Canal de Fotos de Verificação').setDescription('Selecione o canal onde o bot enviará as fotos com resumo de verificação.').setColor(0x2c2f33);
-    await interaction.reply({ embeds: [embed], components: [new ActionRowBuilder().addComponents(select)], ephemeral: true });
-    return true;
-  }
-  if (action === 'mainrole') {
-    const select = new RoleSelectMenuBuilder()
-      .setCustomId('menu:insta:mainrole:set')
-      .setPlaceholder('Selecione 1 cargo')
-      .setMinValues(1)
-      .setMaxValues(1);
-    const embed = new EmbedBuilder().setTitle('Cargo Principal').setDescription('Selecione o cargo que pode verificar/encerrar.').setColor(0x2c2f33);
-    await interaction.reply({ embeds: [embed], components: [new ActionRowBuilder().addComponents(select)], ephemeral: true });
-    return true;
-  }
-  if (action === 'verifiedrole') {
-    const select = new RoleSelectMenuBuilder()
-      .setCustomId('menu:insta:verifiedrole:set')
-      .setPlaceholder('Selecione 1 cargo')
-      .setMinValues(1)
-      .setMaxValues(1);
-    const embed = new EmbedBuilder().setTitle('Cargo Verificado').setDescription('Selecione o cargo que representa usuários verificados.').setColor(0x2c2f33);
-    await interaction.reply({ embeds: [embed], components: [new ActionRowBuilder().addComponents(select)], ephemeral: true });
-    return true;
+    return showChannelPrompt(interaction, {
+      title: 'Canal de Fotos da Verificação',
+      description: 'Escolha o canal onde o bot registrará as fotos aprovadas.',
+      customId: 'menu:insta:select:photos',
+    });
   }
   if (action === 'verifypanel') {
-    const select = new ChannelSelectMenuBuilder()
-      .setCustomId('menu:insta:verifypanel:set')
-      .setPlaceholder('Selecione um canal de texto')
-      .setMinValues(1)
-      .setMaxValues(1)
-      .addChannelTypes(ChannelType.GuildText);
-    const embed = new EmbedBuilder().setTitle('Painel Verifique-se').setDescription('Selecione o canal onde ficará o painel de verificação.').setColor(0x2c2f33);
-    await interaction.reply({ embeds: [embed], components: [new ActionRowBuilder().addComponents(select)], ephemeral: true });
-    return true;
+    return showChannelPrompt(interaction, {
+      title: 'Canal do Painel Verifique-se',
+      description: 'Defina o canal onde ficará o painel principal de verificação.',
+      customId: 'menu:insta:select:verifypanel',
+    });
+  }
+  if (action === 'mainrole' || action === 'verifiedrole') {
+    const isMain = action === 'mainrole';
+    return showRolePrompt(interaction, {
+      title: isMain ? 'Cargo Principal' : 'Cargo Verificado',
+      description: isMain
+        ? 'Escolha o cargo que pode verificar, encerrar e operar o sistema.'
+        : 'Escolha o cargo aplicado aos usuários verificados.',
+      customId: `menu:insta:select:${isMain ? 'mainrole' : 'verifiedrole'}`,
+      min: 1,
+      max: 1,
+    });
+  }
+  if (action === 'pings') {
+    return showRolePrompt(interaction, {
+      title: 'Cargos Notificados',
+      description: 'Selecione até 10 cargos que serão mencionados quando um usuário abrir o ticket de verificação.',
+      customId: 'menu:insta:select:pings',
+      min: 0,
+      max: 10,
+    });
   }
   if (action === 'unverify') {
-    const select = new UserSelectMenuBuilder()
-      .setCustomId('menu:insta:unverify:set')
-      .setPlaceholder('Selecione 1 usuário')
-      .setMinValues(1)
-      .setMaxValues(1);
-    const embed = new EmbedBuilder().setTitle('Cancelar Verificação').setDescription('Selecione o usuário verificado para cancelar a verificação.').setColor(0xED4245);
-    await interaction.reply({ embeds: [embed], components: [new ActionRowBuilder().addComponents(select)], ephemeral: true });
-    return true;
+    return showUserPrompt(interaction, {
+      title: 'Cancelar Verificação',
+      description: 'Selecione o usuário que terá o status de verificado removido em todos os servidores permitidos.',
+      customId: 'menu:insta:select:unverify',
+    });
+  }
+  if (action === 'sendpanel') {
+    return showChannelPrompt(interaction, {
+      title: 'Enviar Painel Verifique-se',
+      description: 'Escolha o canal onde publicaremos o painel com o botão Verifique-se. Assim que selecionar, enviarei e voltarei ao menu.',
+      customId: 'menu:insta:select:sendpanel',
+    });
+  }
+  if (action === 'reset') {
+    if (subaction === 'cancel') {
+      return renderHome(interaction, prisma, { type: 'info', message: 'Reset cancelado.' });
+    }
+    if (subaction === 'confirm') {
+      const ownerId = parts[4];
+      if (ownerId && ownerId !== interaction.user.id) {
+        await interaction.followUp({ content: 'Apenas quem solicitou pode confirmar.', ephemeral: true }).catch(() => {});
+        return true;
+      }
+      return performInstaReset(interaction, prisma);
+    }
+    return showResetConfirm(interaction);
   }
   return false;
 }
 
 async function handleConfigSelect(interaction, ctx) {
-  const { POSSE_USER_ID, ALLOWED_GUILD_IDS } = ctx;
-  if (!POSSE_USER_ID || POSSE_USER_ID !== interaction.user.id) {
-    await interaction.reply({ content: 'Apenas o usuário posse pode usar este comando.', ephemeral: true });
+  await ensureDeferred(interaction);
+  if (!(await ensurePosse(interaction, ctx))) {
     return true;
   }
   const prisma = ctx.getPrisma();
   const cfg = await ensureGlobalConfig(prisma);
-  const id = interaction.customId;
+  const [, , , target] = interaction.customId.split(':');
 
-  if (id.startsWith('menu:insta:set:')) {
-    const mode = id.split(':')[3];
+  if (!target) {
+    return false;
+  }
+
+  if (target === 'boys' || target === 'girls') {
     const channelId = interaction.values?.[0];
     if (!channelId) {
-      await interaction.reply({ content: 'Seleção inválida.', ephemeral: true });
-      return true;
+      return renderHome(interaction, prisma, { type: 'error', message: 'Seleção inválida.' });
     }
     await prisma.globalConfig.update({
       where: { id: cfg.id },
-      data: mode === 'boys' ? { instaBoysChannelId: channelId } : { instaGirlsChannelId: channelId },
+      data: target === 'boys' ? { instaBoysChannelId: channelId } : { instaGirlsChannelId: channelId },
     });
-    await interaction.update({ content: `Canal de Insta ${mode === 'boys' ? 'Boys' : 'Girls'} definido: <#${channelId}>`, embeds: [], components: [] });
-    return true;
+    return renderHome(interaction, prisma, {
+      type: 'success',
+      message: `Canal de ${target === 'boys' ? 'InstaBoy' : 'InstaGirl'} definido: <#${channelId}>`,
+    });
   }
-  if (id === 'menu:insta:pings:set') {
+
+  if (target === 'photos') {
+    const channelId = interaction.values?.[0];
+    if (!channelId) {
+      return renderHome(interaction, prisma, { type: 'error', message: 'Seleção inválida.' });
+    }
+    await prisma.globalConfig.update({ where: { id: cfg.id }, data: { photosChannelId: channelId } });
+    return renderHome(interaction, prisma, { type: 'success', message: `Canal de fotos definido: <#${channelId}>` });
+  }
+
+  if (target === 'verifypanel') {
+    const channelId = interaction.values?.[0];
+    if (!channelId) {
+      return renderHome(interaction, prisma, { type: 'error', message: 'Seleção inválida.' });
+    }
+    await prisma.globalConfig.update({ where: { id: cfg.id }, data: { verifyPanelChannelId: channelId } });
+    return renderHome(interaction, prisma, { type: 'success', message: `Painel definido para <#${channelId}>` });
+  }
+
+  if (target === 'mainrole' || target === 'verifiedrole') {
+    const roleId = interaction.values?.[0];
+    if (!roleId) {
+      return renderHome(interaction, prisma, { type: 'error', message: 'Seleção inválida.' });
+    }
+    await prisma.globalConfig.update({
+      where: { id: cfg.id },
+      data: target === 'mainrole' ? { mainRoleId: roleId } : { verifiedRoleId: roleId },
+    });
+    return renderHome(interaction, prisma, {
+      type: 'success',
+      message: `${target === 'mainrole' ? 'Cargo principal' : 'Cargo verificado'} definido: <@&${roleId}>`,
+    });
+  }
+
+  if (target === 'pings') {
     const roleIds = [...new Set(interaction.values || [])];
     await prisma.ticketPingRoleGlobal.deleteMany({ where: { globalConfigId: cfg.id } });
     if (roleIds.length) {
       await prisma.ticketPingRoleGlobal.createMany({ data: roleIds.map((roleId) => ({ globalConfigId: cfg.id, roleId })) });
     }
-    await interaction.update({ content: `Cargos notificados atualizados: ${roleIds.map((rid) => `<@&${rid}>`).join(', ') || 'nenhum'}`, embeds: [], components: [] });
-    return true;
+    const message = roleIds.length
+      ? `Cargos a mencionar: ${roleIds.map((rid) => `<@&${rid}>`).join(', ')}`
+      : 'Nenhum cargo será mencionado ao abrir o ticket.';
+    return renderHome(interaction, prisma, { type: 'success', message });
   }
-  if (id === 'menu:insta:photos:set') {
-    const channelId = interaction.values?.[0];
-    if (!channelId) {
-      await interaction.reply({ content: 'Seleção inválida.', ephemeral: true });
-      return true;
-    }
-    await prisma.globalConfig.update({ where: { id: cfg.id }, data: { photosChannelId: channelId } });
-    const refreshed = await getGlobalConfig(prisma);
-    await interaction.update({ content: `Canal de fotos definido: <#${channelId}>`, embeds: [buildInstaEmbed(refreshed)], components: buildInstaMenuRows() });
-    return true;
-  }
-  if (id === 'menu:insta:mainrole:set') {
-    const roleId = interaction.values?.[0];
-    if (!roleId) {
-      await interaction.reply({ content: 'Seleção inválida.', ephemeral: true });
-      return true;
-    }
-    await prisma.globalConfig.update({ where: { id: cfg.id }, data: { mainRoleId: roleId } });
-    const refreshed = await getGlobalConfig(prisma);
-    await interaction.update({ content: `Cargo principal definido: <@&${roleId}>`, embeds: [buildInstaEmbed(refreshed)], components: buildInstaMenuRows() });
-    return true;
-  }
-  if (id === 'menu:insta:verifiedrole:set') {
-    const roleId = interaction.values?.[0];
-    if (!roleId) {
-      await interaction.reply({ content: 'Seleção inválida.', ephemeral: true });
-      return true;
-    }
-    await prisma.globalConfig.update({ where: { id: cfg.id }, data: { verifiedRoleId: roleId } });
-    const refreshed = await getGlobalConfig(prisma);
-    await interaction.update({ content: `Cargo verificado definido: <@&${roleId}>`, embeds: [buildInstaEmbed(refreshed)], components: buildInstaMenuRows() });
-    return true;
-  }
-  if (id === 'menu:insta:verifypanel:set') {
-    const channelId = interaction.values?.[0];
-    if (!channelId) {
-      await interaction.reply({ content: 'Seleção inválida.', ephemeral: true });
-      return true;
-    }
-    await prisma.globalConfig.update({ where: { id: cfg.id }, data: { verifyPanelChannelId: channelId } });
-    const refreshed = await getGlobalConfig(prisma);
-    await interaction.update({ content: `Painel de verificação definido: <#${channelId}>`, embeds: [buildInstaEmbed(refreshed)], components: buildInstaMenuRows() });
-    return true;
-  }
-  if (id === 'menu:insta:unverify:set') {
+
+  if (target === 'unverify') {
     const userId = interaction.values?.[0];
     if (!userId) {
-      await interaction.reply({ content: 'Seleção inválida.', ephemeral: true });
-      return true;
+      return renderHome(interaction, prisma, { type: 'error', message: 'Seleção inválida.' });
     }
     const fullCfg = await getGlobalConfig(prisma);
     await prisma.verifiedUserGlobal.deleteMany({ where: { userId } });
     if (fullCfg?.verifiedRoleId) {
+      const allowedGuilds = ctx.ALLOWED_GUILD_IDS || [];
       try {
         const localMember = await interaction.guild.members.fetch(userId).catch(() => null);
         if (localMember && localMember.roles.cache.has(fullCfg.verifiedRoleId)) {
           await localMember.roles.remove(fullCfg.verifiedRoleId).catch(() => {});
         }
-        for (const gid of ALLOWED_GUILD_IDS) {
+        for (const gid of allowedGuilds) {
           if (gid === interaction.guild.id) continue;
           const guild = interaction.client.guilds.cache.get(gid) || await interaction.client.guilds.fetch(gid).catch(() => null);
           if (!guild) continue;
@@ -256,10 +347,102 @@ async function handleConfigSelect(interaction, ctx) {
         }
       } catch {}
     }
-    await interaction.update({ content: `Verificação cancelada para <@${userId}>. Removido do banco e do cargo verificado (todos servidores permitidos).`, embeds: [], components: [] });
-    return true;
+    return renderHome(interaction, prisma, {
+      type: 'success',
+      message: `Verificação cancelada para <@${userId}> em todos os servidores configurados.`,
+    });
   }
+
+  if (target === 'sendpanel') {
+    const channelId = interaction.values?.[0];
+    if (!channelId) {
+      return renderHome(interaction, prisma, { type: 'error', message: 'Seleção inválida.' });
+    }
+    const channel = await interaction.guild.channels.fetch(channelId).catch(() => null);
+    if (!channel || channel.type !== ChannelType.GuildText) {
+      return renderHome(interaction, prisma, { type: 'error', message: 'Preciso de um canal de texto válido.' });
+    }
+    const success = await publishVerificationPanel(channel);
+    if (!success) {
+      return renderHome(interaction, prisma, { type: 'error', message: 'Falha ao publicar o painel. Verifique minhas permissões.' });
+    }
+    await prisma.globalConfig.update({ where: { id: cfg.id }, data: { verifyPanelChannelId: channelId } });
+    return renderHome(interaction, prisma, { type: 'success', message: `Painel enviado em <#${channelId}>` });
+  }
+
   return false;
+}
+
+async function publishVerificationPanel(channel) {
+  try {
+    const embed = new EmbedBuilder()
+      .setTitle('Verifique-se')
+      .setDescription('Clique em **Verifique-se** para abrir um tópico privado com a equipe. Envie suas fotos com calma e aguarde o atendimento.')
+      .setColor(0x2ECC71);
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('verify:open').setLabel('Verifique-se').setStyle(ButtonStyle.Success),
+    );
+    await channel.send({ embeds: [embed], components: [row] });
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+async function performInstaReset(interaction, prisma) {
+  await ensureDeferred(interaction);
+  const cfg = await getGlobalConfig(prisma);
+  const channelIds = [cfg?.instaBoysChannelId, cfg?.instaGirlsChannelId].filter(Boolean);
+  if (!channelIds.length) {
+    return renderHome(interaction, prisma, { type: 'error', message: 'Configure os canais de Insta antes de resetar.' });
+  }
+
+  const summaries = [];
+  for (const chId of channelIds) {
+    const posts = await prisma.instaPostGlobal.findMany({ where: { channelId: chId }, orderBy: { likeCount: 'desc' } });
+    if (!posts.length) {
+      summaries.push(`Sem posts novos em <#${chId}>.`);
+      continue;
+    }
+    const channel = await interaction.guild.channels.fetch(chId).catch(() => null);
+    if (!channel) {
+      summaries.push(`Não consegui acessar <#${chId}>.`);
+      continue;
+    }
+    const winner = posts[0];
+    if (winner) {
+      const text = `Ganhador da semana\n<@${winner.authorId}>\n${winner.likeCount} curtidas`;
+      const isImage = winner.mediaType === 'image' || winner.mediaType === 'gif';
+      const embed = new EmbedBuilder().setDescription(text).setColor(0x2ECC71);
+      if (isImage) embed.setImage(winner.mediaUrl);
+      let msg;
+      if (isImage) {
+        msg = await channel.send({ embeds: [embed] });
+      } else {
+        msg = await channel.send({ content: text, files: [{ attachment: winner.mediaUrl, name: 'midia' }] });
+      }
+      await prisma.instaWinnerGlobal.create({
+        data: {
+          channelId: chId,
+          postId: winner.id,
+          winnerUserId: winner.authorId,
+          likeCount: winner.likeCount,
+          winnerMessageId: msg.id,
+        },
+      });
+      summaries.push(`Ganhador anunciado em <#${chId}>.`);
+    }
+    for (const p of posts) {
+      if (winner && p.id === winner.id) continue;
+      await prisma.instaLikeGlobal.deleteMany({ where: { postId: p.id } });
+      await prisma.instaCommentGlobal.deleteMany({ where: { postId: p.id } });
+      await prisma.instaPostGlobal.delete({ where: { id: p.id } });
+      await channel.messages.delete(p.id).catch(() => {});
+    }
+  }
+
+  const message = summaries.length ? summaries.join(' ') : 'Reset concluído.';
+  return renderHome(interaction, prisma, { type: 'success', message });
 }
 
 async function handlePostButtons(interaction) {
@@ -368,68 +551,6 @@ async function handlePostButtons(interaction) {
   return false;
 }
 
-async function handleReset(interaction) {
-  const action = interaction.customId.split(':')[1];
-  if (action === 'cancel') {
-    if (interaction.deferred || interaction.replied) {
-      await interaction.followUp({ content: 'Cancelado.', ephemeral: true });
-    } else {
-      await interaction.reply({ content: 'Cancelado.', ephemeral: true });
-    }
-    return true;
-  }
-  if (action === 'confirm') {
-    const requesterId = interaction.customId.split(':')[2];
-    if (requesterId !== interaction.user.id) {
-      await interaction.reply({ content: 'Apenas quem solicitou pode confirmar.', ephemeral: true });
-      return true;
-    }
-    const prisma = getPrisma();
-    const cfg = await getGlobalConfig(prisma);
-    if (!cfg?.instaBoysChannelId && !cfg?.instaGirlsChannelId) {
-      await interaction.reply({ content: 'Canais de insta não configurados.', ephemeral: true });
-      return true;
-    }
-    const channels = [cfg.instaBoysChannelId, cfg.instaGirlsChannelId].filter(Boolean);
-    for (const chId of channels) {
-      const posts = await prisma.instaPostGlobal.findMany({ where: { channelId: chId }, orderBy: { likeCount: 'desc' } });
-      const winner = posts[0];
-      const channel = await interaction.guild.channels.fetch(chId).catch(() => null);
-      if (!channel) continue;
-      if (winner) {
-        const text = `Ganhador da semana\n<@${winner.authorId}>\n${winner.likeCount} curtidas`;
-        const isImage = winner.mediaType === 'image' || winner.mediaType === 'gif';
-        const embed = new EmbedBuilder().setDescription(text).setColor(0x2ECC71);
-        if (isImage) embed.setImage(winner.mediaUrl);
-        let msg;
-        if (isImage) {
-          msg = await channel.send({ embeds: [embed] });
-        } else {
-          msg = await channel.send({ content: text, files: [{ attachment: winner.mediaUrl, name: 'midia' }] });
-        }
-        await prisma.instaWinnerGlobal.create({
-          data: {
-            channelId: chId,
-            postId: winner.id,
-            winnerUserId: winner.authorId,
-            likeCount: winner.likeCount,
-            winnerMessageId: msg.id,
-          },
-        });
-      }
-      for (const p of posts) {
-        if (winner && p.id === winner.id) continue;
-        await prisma.instaLikeGlobal.deleteMany({ where: { postId: p.id } });
-        await prisma.instaCommentGlobal.deleteMany({ where: { postId: p.id } });
-        await prisma.instaPostGlobal.delete({ where: { id: p.id } });
-        await channel.messages.delete(p.id).catch(() => {});
-      }
-    }
-    await interaction.reply({ content: 'Reset concluído.', ephemeral: true });
-    return true;
-  }
-  return false;
-}
 
 async function getOrCreateWebhook(channel) {
   if (webhookCache.has(channel.id)) return webhookCache.get(channel.id);
