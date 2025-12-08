@@ -1,3 +1,4 @@
+const { EmbedBuilder } = require('discord.js');
 const { runBan, runUnban, runCastigo, runRemoveCastigo, resolveTargetUser } = require('../actions/moderationActions');
 const { COMMAND_TYPES, ensureModerationConfig, memberHasPermission } = require('../lib/moderation');
 
@@ -121,7 +122,11 @@ const COMMAND_HANDLERS = {
   unban: handlePrefixUnban,
   castigo: handlePrefixCastigo,
   removercastigo: handlePrefixRemoveCastigo,
+  ping: handlePingCommand,
 };
+
+const pingCooldowns = new Map();
+const PING_COOLDOWN_MS = 10_000;
 
 async function handleMessage(message, ctx) {
   if (!message.guild || message.author.bot) return false;
@@ -137,6 +142,16 @@ async function handleMessage(message, ctx) {
   const handler = COMMAND_HANDLERS[commandName];
   if (!handler) {
     return false;
+  }
+
+  if (commandName === 'ping') {
+    const now = Date.now();
+    const lastRun = pingCooldowns.get(message.channel.id) || 0;
+    if (now - lastRun < PING_COOLDOWN_MS) {
+      await deleteCommandMessage(message);
+      return true;
+    }
+    pingCooldowns.set(message.channel.id, now);
   }
 
   await deleteCommandMessage(message);
@@ -248,6 +263,38 @@ async function handlePrefixRemoveCastigo(message, args, prisma, posseId) {
     posseId,
   });
   await sendSuccessFeedback(message.channel, result.message, result.logEmbed);
+}
+
+async function handlePingCommand(message) {
+  const gatewayPing = Math.max(0, Math.round(message.client.ws.ping || 0));
+  const messageLatency = Math.max(0, Date.now() - (message.createdTimestamp || Date.now()));
+  const feedback = getLatencyFeedback(Math.max(gatewayPing, messageLatency));
+
+  const embed = new EmbedBuilder()
+    .setTitle('🏓 Pong!')
+    .setColor(feedback.color)
+    .addFields(
+      { name: 'Latência da mensagem', value: `${messageLatency}ms`, inline: true },
+      { name: 'Ping da API', value: `${gatewayPing}ms`, inline: true },
+      { name: 'Feedback', value: `${feedback.emoji} ${feedback.label}`, inline: true },
+    )
+    .setFooter({ text: 'Quanto menor a latência, melhor o desempenho.' })
+    .setTimestamp(new Date());
+
+  await sendTemporaryMessage(message.channel, { embeds: [embed] }, 15000);
+}
+
+function getLatencyFeedback(value) {
+  if (value <= 60) {
+    return { label: 'Excelente', emoji: '🟢', color: 0x4ade80 };
+  }
+  if (value <= 120) {
+    return { label: 'Bom', emoji: '🟡', color: 0xfacc15 };
+  }
+  if (value <= 250) {
+    return { label: 'Ruim', emoji: '🟠', color: 0xf97316 };
+  }
+  return { label: 'Péssimo', emoji: '🔴', color: 0xef4444 };
 }
 
 module.exports = { handleMessage };
