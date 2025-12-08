@@ -347,6 +347,103 @@ async function promptVipChannelInput(interaction, membership, { promptKey, title
   });
 }
 
+function buildVipAdminPromptPayload({ promptKey, title, instructions, status, isError } = {}) {
+  const embed = new EmbedBuilder()
+    .setTitle(title)
+    .setColor(isError ? ERROR_COLOR : 0xffffff)
+    .setDescription(`${instructions}\n\nDigite sua resposta neste chat. Para cancelar, escreva **cancelar** ou use o botão abaixo.`)
+    .setFooter({ text: 'Entrada expira em 2 minutos' })
+    .setTimestamp(new Date());
+
+  if (status) {
+    embed.addFields({ name: isError ? 'Erro' : 'Status', value: status, inline: false });
+  }
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`vipadmin:cancel:${promptKey || 'vipadmin-view'}`).setLabel('Cancelar').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
+  );
+
+  return { embeds: [embed], components: [row] };
+}
+
+async function promptVipAdminInput(interaction, { promptKey, title, instructions, onSubmit }) {
+  const resolvedPromptKey = promptKey || 'vipadmin-view';
+  if (!interaction.channel) {
+    await updateVipPanel(
+      interaction,
+      buildNoticePayload(interaction, 'Abra este painel em um canal de texto para enviar respostas.', {
+        isError: true,
+        includeExisting: false,
+      }),
+    );
+    return;
+  }
+
+  const render = (state = {}) =>
+    buildVipAdminPromptPayload({
+      promptKey: resolvedPromptKey,
+      title,
+      instructions,
+      status: state.status,
+      isError: state.isError,
+    });
+
+  await updateVipPanel(interaction, render());
+  const key = getPromptKey(interaction.user.id, resolvedPromptKey, interaction.guildId);
+  const filter = (msg) => msg.author.id === interaction.user.id && msg.channelId === interaction.channelId;
+  const collector = interaction.channel.createMessageCollector({ filter, time: INPUT_TIMEOUT });
+  registerCollector(key, collector);
+
+  collector.on('collect', async (msg) => {
+    try {
+      const content = (msg.content || '').trim();
+      if (!content) return;
+      if (content.toLowerCase() === 'cancelar') {
+        collector.stop('cancelled');
+        await updateVipPanel(interaction, buildVipAdminHomePayload());
+        return;
+      }
+      try {
+        const result = await onSubmit(content);
+        collector.stop('handled');
+        if (result?.payload) {
+          await updateVipPanel(interaction, result.payload);
+        } else if (result?.status) {
+          await updateVipPanel(
+            interaction,
+            buildVipAdminPromptPayload({
+              promptKey: resolvedPromptKey,
+              title,
+              instructions,
+              status: result.status,
+              isError: result.isError,
+            }),
+          );
+        } else {
+          await updateVipPanel(interaction, buildVipAdminHomePayload());
+        }
+        return;
+      } catch (err) {
+        await updateVipPanel(
+          interaction,
+          render({ status: err.message || 'Não foi possível processar sua resposta.', isError: true }),
+        );
+      }
+      collector.resetTimer();
+    } finally {
+      await msg.delete().catch(() => {});
+    }
+  });
+
+  collector.on('end', async (_, reason) => {
+    if (['handled', 'cancelled', 'replaced'].includes(reason)) return;
+    await updateVipPanel(interaction, buildVipAdminHomePayload());
+    await interaction
+      .followUp({ embeds: [buildInfoEmbed('Tempo esgotado para responder.', true)], ephemeral: true })
+      .catch(() => {});
+  });
+}
+
 function buildVipTagPromptPayload(membership, { promptKey, title, instructions, status, isError } = {}) {
   const embed = new EmbedBuilder()
     .setTitle(title)
@@ -1081,7 +1178,7 @@ async function showVipList(interaction, ctx, page = 1) {
   await updateVipPanel(interaction, { embeds: [embed], components: [row] });
 }
 
-async function sendVipDetail(interaction, membership) {
+function buildVipDetailPayload(membership) {
   const remaining = Math.max(0, Math.ceil((membership.expiresAt.getTime() - Date.now()) / DAY_MS));
   const embed = new EmbedBuilder()
     .setTitle(`VIP de ${membership.userId}`)
@@ -1100,9 +1197,10 @@ async function sendVipDetail(interaction, membership) {
     new ButtonBuilder().setCustomId(`vipadmin:adddays:${membership.id}`).setLabel('Adicionar dias').setEmoji('➕').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`vipadmin:removedays:${membership.id}`).setLabel('Remover dias').setEmoji('➖').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(`vipadmin:delete:${membership.id}`).setLabel('Deletar VIP').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('vipadmin:home').setLabel('Voltar').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
   );
 
-  await interaction.followUp({ embeds: [embed], components: [row], ephemeral: true });
+  return { embeds: [embed], components: [row] };
 }
 
 async function handleVipAdmin(interaction, ctx) {
@@ -1112,6 +1210,18 @@ async function handleVipAdmin(interaction, ctx) {
   }
   const prisma = ctx.getPrisma();
   const [, action, value] = interaction.customId.split(':');
+
+  if (action !== 'prompt-view') {
+    stopPrompt(interaction, 'vipadmin-view');
+  }
+
+  if (action === 'cancel') {
+    if (value) {
+      stopPrompt(interaction, value);
+    }
+    await updateVipPanel(interaction, buildVipAdminHomePayload());
+    return;
+  }
 
   if (action === 'home') {
     const payload = buildVipAdminHomePayload();
@@ -1126,19 +1236,24 @@ async function handleVipAdmin(interaction, ctx) {
   }
 
   if (action === 'prompt-view') {
-    await promptText(interaction, 'vipadmin-view', 'Informe o ID ou menção do usuário.', async (input) => {
-      const userId = extractUserId(input);
-      if (!userId) {
-        throw new Error('Envie um ID ou menção válido.');
-      }
-      const membership = await prisma.vipMembership.findUnique({
-        where: { userId },
-        include: { plan: true, tag: true, channel: true },
-      });
-      if (!membership || membership.guildId !== interaction.guildId || !membership.active) {
-        throw new Error('Nenhum VIP ativo para este usuário.');
-      }
-      await sendVipDetail(interaction, membership);
+    await promptVipAdminInput(interaction, {
+      promptKey: 'vipadmin-view',
+      title: 'Consultar VIP',
+      instructions: 'Envie o ID ou a menção do usuário que deseja visualizar.',
+      onSubmit: async (input) => {
+        const userId = extractUserId(input);
+        if (!userId) {
+          throw new Error('Envie um ID ou menção válido.');
+        }
+        const membership = await prisma.vipMembership.findUnique({
+          where: { userId },
+          include: { plan: true, tag: true, channel: true },
+        });
+        if (!membership || membership.guildId !== interaction.guildId || !membership.active) {
+          throw new Error('Nenhum VIP ativo para este usuário.');
+        }
+        return { payload: buildVipDetailPayload(membership) };
+      },
     });
     return;
   }
