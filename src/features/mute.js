@@ -43,16 +43,15 @@ async function handleVoiceStateUpdate(oldState, newState) {
     if (cfg.muteVoiceRoleId && !member.roles.cache.has(cfg.muteVoiceRoleId)) {
       await member.roles.add(cfg.muteVoiceRoleId, 'Reaplicando cargo de mute voz').catch(() => {});
     }
-  } else {
+    return;
+  }
+
+  if (joinedUnlockChannel) {
     if (newState.serverMute) {
-      const reason = joinedUnlockChannel
-        ? 'Canal de desbloqueio - mute manual liberado'
-        : 'Removendo mute de voz sem registro ativo';
-      await newState.setMute(false, reason).catch(() => {});
+      await newState.setMute(false, 'Canal de desbloqueio - mute manual liberado').catch(() => {});
     }
     if (cfg.muteVoiceRoleId && member.roles.cache.has(cfg.muteVoiceRoleId)) {
-      // Remove cargos aplicados manualmente, independente do canal, já que não há registro no sistema
-      await member.roles.remove(cfg.muteVoiceRoleId, 'Removendo cargo de mute voz sem registro').catch(() => {});
+      await member.roles.remove(cfg.muteVoiceRoleId, 'Canal de desbloqueio - removendo cargo de mute voz').catch(() => {});
     }
   }
 }
@@ -90,9 +89,6 @@ async function enforceRoleState({ prisma, cfg, guildId, member, roleId, table })
   if (active && !hasRole) {
     await member.roles.add(roleId, 'Reaplicando cargo de mute protegido').catch(() => {});
     return;
-  }
-  if (!active && hasRole) {
-    await member.roles.remove(roleId, 'Removendo cargo de mute sem registro').catch(() => {});
   }
 }
 
