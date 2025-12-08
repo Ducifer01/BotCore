@@ -4,6 +4,7 @@ const { getGlobalConfig } = require('../services/globalConfig');
 
 const verifyThreads = new Map(); // threadId -> { targetUserId }
 const pendingVerifyImage = new Map(); // `${threadId}:${verifierId}` -> { buffer, name }
+const pendingVerifySex = new Map(); // `${threadId}:${targetUserId}` -> 'male' | 'female'
 
 function buildVerifyThreadName(user) {
   const safeUsername = user.username.replace(/[^\w\- ]/g, '').trim() || 'usuario';
@@ -13,6 +14,51 @@ function buildVerifyThreadName(user) {
 function threadBelongsToUser(thread, userId) {
   if (!thread?.name) return false;
   return thread.name.startsWith(`verif-${userId}`);
+}
+
+function buildSexButtons(threadId, targetUserId, selected) {
+  const maleBtn = new ButtonBuilder()
+    .setCustomId(`verify:sex:male:${threadId}:${targetUserId}`)
+    .setLabel('Sexo Masculino')
+    .setStyle(selected === 'male' ? ButtonStyle.Success : ButtonStyle.Secondary);
+  const femaleBtn = new ButtonBuilder()
+    .setCustomId(`verify:sex:female:${threadId}:${targetUserId}`)
+    .setLabel('Sexo Feminino')
+    .setStyle(selected === 'female' ? ButtonStyle.Success : ButtonStyle.Secondary);
+  return new ActionRowBuilder().addComponents(maleBtn, femaleBtn);
+}
+
+function buildConfirmRow(threadId, targetUserId, selected) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`verify:confirm:${threadId}:${targetUserId}`)
+      .setLabel('Perfeito')
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(!selected),
+    new ButtonBuilder().setCustomId(`verify:update:${threadId}`).setLabel('Atualizar').setStyle(ButtonStyle.Primary),
+  );
+}
+
+function buildPreviewEmbed(targetUserId, verifierId, selectedSex, imageUrl) {
+  const sexLabel = selectedSex === 'male' ? 'Masculino'
+    : selectedSex === 'female' ? 'Feminino'
+      : 'Não definido';
+  const color = selectedSex === 'male' ? 0x3498DB : selectedSex === 'female' ? 0xE91E63 : 0x2C2F33;
+  const targetText = targetUserId && targetUserId !== 'unknown' ? `<@${targetUserId}>` : 'Desconhecido';
+  const embed = new EmbedBuilder()
+    .setTitle('Pré-visualização da Verificação')
+    .setDescription([
+      `• Usuário: ${targetText}`,
+      `• Verificador: <@${verifierId}>`,
+      `• Sexo selecionado: **${sexLabel}**`,
+      '',
+      'Selecione o sexo correto antes de concluir.',
+    ].join('\n'))
+    .setColor(color);
+  if (imageUrl) {
+    embed.setImage(imageUrl);
+  }
+  return embed;
 }
 
 async function handleInteraction(interaction, ctx) {
@@ -37,6 +83,9 @@ async function handleInteraction(interaction, ctx) {
   }
   if (customId.startsWith('verify:start:')) {
     return handleStart(interaction, cfg);
+  }
+  if (customId.startsWith('verify:sex:')) {
+    return handleSexSelection(interaction, cfg);
   }
   if (customId.startsWith('verify:confirm:')) {
     return handleConfirm(interaction, cfg, prisma);
@@ -128,17 +177,50 @@ async function handleStart(interaction, cfg) {
       const res = await fetch(att.url);
       const arr = await res.arrayBuffer();
       const buf = Buffer.from(arr);
-      pendingVerifyImage.set(`${threadId}:${interaction.user.id}`, { buffer: buf, name: att.name || 'imagem.png' });
+      const imageName = att.name || 'imagem.png';
+      pendingVerifyImage.set(`${threadId}:${interaction.user.id}`, { buffer: buf, name: imageName });
+      pendingVerifySex.delete(`${threadId}:${targetUserId}`);
       await m.delete().catch(() => {});
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`verify:confirm:${threadId}:${targetUserId}`).setLabel('Perfeito').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId(`verify:update:${threadId}`).setLabel('Atualizar').setStyle(ButtonStyle.Primary),
-      );
-      await interaction.followUp({ content: 'Confira a imagem e confirme:', files: [{ attachment: buf, name: att.name || 'imagem.png' }], components: [row], ephemeral: true });
+      const previewEmbed = buildPreviewEmbed(targetUserId, interaction.user.id, null, `attachment://${imageName}`);
+      const components = [
+        buildSexButtons(threadId, targetUserId, null),
+        buildConfirmRow(threadId, targetUserId, null),
+      ];
+      await interaction.followUp({
+        embeds: [previewEmbed],
+        files: [{ attachment: buf, name: imageName }],
+        components,
+        ephemeral: true,
+      });
     } catch (e) {
       await interaction.followUp({ content: 'Falha ao processar a imagem, tente novamente.', ephemeral: true });
     }
   });
+  return true;
+}
+
+async function handleSexSelection(interaction, cfg) {
+  if (!cfg?.mainRoleId || !interaction.member.roles.cache.has(cfg.mainRoleId)) {
+    await interaction.reply({ content: 'Apenas o cargo principal pode definir o sexo do usuário.', ephemeral: true });
+    return true;
+  }
+  const [, , sex, threadId, targetUserId] = interaction.customId.split(':');
+  if (!['male', 'female'].includes(sex)) {
+    await interaction.reply({ content: 'Opção inválida.', ephemeral: true });
+    return true;
+  }
+  const key = `${threadId}:${targetUserId}`;
+  pendingVerifySex.set(key, sex);
+  try {
+    await interaction.deferUpdate().catch(() => {});
+    const existingImage = interaction.message.embeds?.[0]?.image?.url;
+    const embed = buildPreviewEmbed(targetUserId, interaction.user.id, sex, existingImage);
+    const components = [
+      buildSexButtons(threadId, targetUserId, sex),
+      buildConfirmRow(threadId, targetUserId, sex),
+    ];
+    await interaction.editReply({ embeds: [embed], components }).catch(() => {});
+  } catch {}
   return true;
 }
 
@@ -154,6 +236,12 @@ async function handleConfirm(interaction, cfg, prisma) {
     await interaction.reply({ content: 'Nenhuma imagem em espera. Clique em Verificar e envie uma imagem.', ephemeral: true });
     return true;
   }
+  const sexKey = `${threadId}:${targetUserId}`;
+  const selectedSex = pendingVerifySex.get(sexKey);
+  if (!selectedSex) {
+    await interaction.reply({ content: 'Selecione se o usuário é masculino ou feminino antes de confirmar.', ephemeral: true });
+    return true;
+  }
   if (cfg.verifiedRoleId) {
     const member = await interaction.guild.members.fetch(targetUserId).catch(() => null);
     if (member && !member.roles.cache.has(cfg.verifiedRoleId)) {
@@ -162,20 +250,28 @@ async function handleConfirm(interaction, cfg, prisma) {
   }
   await prisma.verifiedUserGlobal.upsert({
     where: { userId: targetUserId },
-    update: { verifiedBy: interaction.user.id },
-    create: { userId: targetUserId, verifiedBy: interaction.user.id },
+    update: { verifiedBy: interaction.user.id, sex: selectedSex },
+    create: { userId: targetUserId, verifiedBy: interaction.user.id, sex: selectedSex },
   });
   try {
-    if (cfg?.photosChannelId) {
-      const photosChannel = await interaction.client.channels.fetch(cfg.photosChannelId).catch(() => null);
+    const targetChannelId = selectedSex === 'male'
+      ? cfg?.photosMaleChannelId || cfg?.photosChannelId
+      : cfg?.photosFemaleChannelId || cfg?.photosChannelId;
+    if (targetChannelId) {
+      const photosChannel = await interaction.client.channels.fetch(targetChannelId).catch(() => null);
       if (photosChannel && photosChannel.isTextBased()) {
-        const content = [`Usuario: <@${targetUserId}> | ${targetUserId}`, `VerificadoPor: <@${interaction.user.id}> | ${interaction.user.id}`].join('\n');
+        const content = [
+          `Usuario: <@${targetUserId}> | ${targetUserId}`,
+          `Verificado Por: <@${interaction.user.id}> | ${interaction.user.id}`,
+          `Sexo: ${selectedSex === 'male' ? 'Masculino' : 'Feminino'}`,
+        ].join('\n');
         const file = new AttachmentBuilder(img.buffer, { name: img.name });
         await photosChannel.send({ content, files: [file] });
       }
     }
   } catch {}
   pendingVerifyImage.delete(key);
+  pendingVerifySex.delete(sexKey);
   await interaction.reply({ content: 'Verificação concluída.', ephemeral: true });
   return true;
 }
@@ -200,11 +296,21 @@ async function handleUpdate(interaction, cfg) {
       const buf = Buffer.from(arr);
       pendingVerifyImage.set(`${threadId}:${interaction.user.id}`, { buffer: buf, name: att.name || 'imagem.png' });
       await m.delete().catch(() => {});
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`verify:confirm:${threadId}:${verifyThreads.get(threadId)?.targetUserId || 'unknown'}`).setLabel('Perfeito').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId(`verify:update:${threadId}`).setLabel('Atualizar').setStyle(ButtonStyle.Primary),
-      );
-      await interaction.followUp({ content: 'Imagem atualizada. Confira e confirme:', files: [{ attachment: buf, name: att.name || 'imagem.png' }], components: [row], ephemeral: true });
+      const targetUserId = verifyThreads.get(threadId)?.targetUserId || 'unknown';
+      const sexKey = targetUserId === 'unknown' ? null : `${threadId}:${targetUserId}`;
+      const selectedSex = sexKey ? pendingVerifySex.get(sexKey) || null : null;
+      const components = [
+        buildSexButtons(threadId, targetUserId, selectedSex),
+        buildConfirmRow(threadId, targetUserId, selectedSex),
+      ];
+      const imageUrl = `attachment://${att.name || 'imagem.png'}`;
+      const previewEmbed = buildPreviewEmbed(targetUserId, interaction.user.id, selectedSex, imageUrl);
+      await interaction.followUp({
+        embeds: [previewEmbed],
+        files: [{ attachment: buf, name: att.name || 'imagem.png' }],
+        components,
+        ephemeral: true,
+      });
     } catch (e) {
       await interaction.followUp({ content: 'Falha ao processar a imagem, tente novamente.', ephemeral: true });
     }
@@ -218,6 +324,10 @@ async function handleClose(interaction, cfg) {
     return true;
   }
   const threadId = interaction.customId.split(':')[2];
+  const tracked = verifyThreads.get(threadId);
+  if (tracked?.targetUserId) {
+    pendingVerifySex.delete(`${threadId}:${tracked.targetUserId}`);
+  }
   const thread = await interaction.guild.channels.fetch(threadId).catch(() => null);
   if (!thread) {
     await interaction.reply({ content: 'Tópico não encontrado.', ephemeral: true });
@@ -255,4 +365,5 @@ module.exports = {
   handleClose,
   verifyThreads,
   pendingVerifyImage,
+  pendingVerifySex,
 };

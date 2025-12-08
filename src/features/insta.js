@@ -1,9 +1,92 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelSelectMenuBuilder, RoleSelectMenuBuilder, UserSelectMenuBuilder, ChannelType, AttachmentBuilder } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelSelectMenuBuilder, RoleSelectMenuBuilder, UserSelectMenuBuilder, ChannelType, AttachmentBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const { getGlobalConfig, ensureGlobalConfig } = require('../services/globalConfig');
 const { getPrisma } = require('../db');
 
 const webhookCache = new Map();
 const instaWebhookBlock = new Map();
+
+function buildPostActionRow(postId, likeCount = '0', commentCount = '0') {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`insta:like:${postId}`).setEmoji('❤️').setLabel(likeCount).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`insta:comment:${postId}`).setEmoji('💬').setLabel(commentCount).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`insta:listlikes:${postId}:1`).setEmoji('📃').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`insta:listcomments:${postId}:1`).setEmoji('📝').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`insta:delete:${postId}`).setEmoji('🗑️').setStyle(ButtonStyle.Danger),
+  );
+}
+
+function buildPaginationRow(type, postId, page, totalPages) {
+  const prevPage = Math.max(1, page - 1);
+  const nextPage = Math.min(totalPages, page + 1);
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`insta:${type}:${postId}:prev:${prevPage}`)
+      .setEmoji('⬅️')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(page <= 1),
+    new ButtonBuilder()
+      .setCustomId(`insta:${type}:${postId}:next:${nextPage}`)
+      .setEmoji('➡️')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(page >= totalPages),
+  );
+}
+
+function extractAuthorLabel(text) {
+  if (!text) return '';
+  const match = text.match(/Autor:\s*([^•]+)/i);
+  if (match && match[1]) return match[1].trim();
+  if (text.includes('•')) {
+    return text.split('•')[0].replace(/Autor:/i, '').trim();
+  }
+  return text.trim();
+}
+
+async function resolveAuthorLabel(client, post, footerText) {
+  const existing = extractAuthorLabel(footerText);
+  if (existing) return existing;
+  const user = await client.users.fetch(post.authorId).catch(() => null);
+  if (user) return user.username;
+  return `ID:${post.authorId}`;
+}
+
+async function buildPostUpdatePayload(client, post, messageLike, likeCount, commentCount) {
+  const payload = {
+    components: [buildPostActionRow(post.id, String(likeCount || 0), String(commentCount || 0))],
+  };
+  const embedData = messageLike?.embeds?.[0];
+  if (!embedData) {
+    return payload;
+  }
+  const embed = EmbedBuilder.from(embedData);
+  const authorLabel = await resolveAuthorLabel(client, post, embedData.footer?.text || '');
+  embed.setFooter({ text: `Autor: ${authorLabel} • ❤️ ${likeCount || 0} • 💬 ${commentCount || 0}` });
+  payload.embeds = [embed];
+  return payload;
+}
+
+function guessAttachmentExtension(contentType) {
+  if (!contentType) return '.png';
+  if (contentType.includes('png')) return '.png';
+  if (contentType.includes('jpeg') || contentType.includes('jpg')) return '.jpg';
+  if (contentType.includes('gif')) return '.gif';
+  if (contentType.includes('webp')) return '.webp';
+  return '.dat';
+}
+
+async function downloadAttachment(attachment) {
+  try {
+    const response = await fetch(attachment.url);
+    if (!response.ok) throw new Error('Failed to fetch attachment');
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const name = attachment.name || `insta-${Date.now()}${guessAttachmentExtension(attachment.contentType || '')}`;
+    return { buffer, name };
+  } catch (error) {
+    console.warn('[insta] Falha ao baixar anexo para repostagem:', error.message);
+    return null;
+  }
+}
 
 async function ensurePosse(interaction, ctx) {
   const { POSSE_USER_ID } = ctx;
@@ -89,7 +172,8 @@ function buildInstaEmbed(cfg, status) {
   const lines = [
     `• Insta Boys: ${cfg?.instaBoysChannelId ? `<#${cfg.instaBoysChannelId}>` : 'não definido'}`,
     `• Insta Girls: ${cfg?.instaGirlsChannelId ? `<#${cfg.instaGirlsChannelId}>` : 'não definido'}`,
-    `• Canal de Fotos: ${cfg?.photosChannelId ? `<#${cfg.photosChannelId}>` : 'não definido'}`,
+    `• Fotos Masculino: ${cfg?.photosMaleChannelId ? `<#${cfg.photosMaleChannelId}>` : 'não definido'}`,
+    `• Fotos Feminino: ${cfg?.photosFemaleChannelId ? `<#${cfg.photosFemaleChannelId}>` : 'não definido'}`,
     `• Cargo Principal: ${cfg?.mainRoleId ? `<@&${cfg.mainRoleId}>` : 'não definido'}`,
     `• Cargo Verificado: ${cfg?.verifiedRoleId ? `<@&${cfg.verifiedRoleId}>` : 'não definido'}`,
     `• Painel Verifique-se: ${cfg?.verifyPanelChannelId ? `<#${cfg.verifyPanelChannelId}>` : 'não definido'}`,
@@ -107,13 +191,14 @@ function buildInstaMenuRows() {
     new ButtonBuilder().setCustomId('menu:back').setLabel('Voltar').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('menu:insta:boys').setLabel('InstaBoy').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('menu:insta:girls').setLabel('InstaGirl').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('menu:insta:photos').setLabel('Canal de Fotos').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('menu:insta:verifypanel').setLabel('Painel Verifique-se').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('menu:insta:photos_male').setLabel('Fotos Masculino').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('menu:insta:photos_female').setLabel('Fotos Feminino').setStyle(ButtonStyle.Secondary),
   );
   const row2 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('menu:insta:mainrole').setLabel('Cargo Principal').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('menu:insta:verifiedrole').setLabel('Cargo Verificado').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('menu:insta:pings').setLabel('Cargos Notificados').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('menu:insta:verifypanel').setLabel('Painel Verifique-se').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('menu:insta:unverify').setLabel('Cancelar Verificação').setStyle(ButtonStyle.Danger),
   );
   const row3 = new ActionRowBuilder().addComponents(
@@ -145,6 +230,9 @@ async function presentMenu(interaction, ctx) {
 }
 
 async function handleInteraction(interaction, ctx) {
+  if (interaction.isModalSubmit() && interaction.customId.startsWith('insta:commentModal:')) {
+    return handleCommentModal(interaction);
+  }
   if (interaction.isChannelSelectMenu() || interaction.isRoleSelectMenu() || interaction.isUserSelectMenu()) {
     if (interaction.customId.startsWith('menu:insta:')) {
       return handleConfigSelect(interaction, ctx);
@@ -183,11 +271,14 @@ async function handleConfigButtons(interaction, ctx) {
       customId: `menu:insta:select:${isBoys ? 'boys' : 'girls'}`,
     });
   }
-  if (action === 'photos') {
+  if (action === 'photos_male' || action === 'photos_female') {
+    const isMale = action === 'photos_male';
     return showChannelPrompt(interaction, {
-      title: 'Canal de Fotos da Verificação',
-      description: 'Escolha o canal onde o bot registrará as fotos aprovadas.',
-      customId: 'menu:insta:select:photos',
+      title: isMale ? 'Canal de Fotos (Masculino)' : 'Canal de Fotos (Feminino)',
+      description: isMale
+        ? 'Escolha o canal onde registraremos as fotos aprovadas dos usuários masculinos.'
+        : 'Escolha o canal onde registraremos as fotos aprovadas das usuárias femininas.',
+      customId: `menu:insta:select:${isMale ? 'photos_male' : 'photos_female'}`,
     });
   }
   if (action === 'verifypanel') {
@@ -277,13 +368,19 @@ async function handleConfigSelect(interaction, ctx) {
     });
   }
 
-  if (target === 'photos') {
+  if (target === 'photos_male' || target === 'photos_female') {
     const channelId = interaction.values?.[0];
     if (!channelId) {
       return renderHome(interaction, prisma, { type: 'error', message: 'Seleção inválida.' });
     }
-    await prisma.globalConfig.update({ where: { id: cfg.id }, data: { photosChannelId: channelId } });
-    return renderHome(interaction, prisma, { type: 'success', message: `Canal de fotos definido: <#${channelId}>` });
+    await prisma.globalConfig.update({
+      where: { id: cfg.id },
+      data: target === 'photos_male' ? { photosMaleChannelId: channelId } : { photosFemaleChannelId: channelId },
+    });
+    return renderHome(interaction, prisma, {
+      type: 'success',
+      message: `${target === 'photos_male' ? 'Canal de fotos masculino' : 'Canal de fotos feminino'} definido: <#${channelId}>`,
+    });
   }
 
   if (target === 'verifypanel') {
@@ -447,7 +544,15 @@ async function performInstaReset(interaction, prisma) {
 
 async function handlePostButtons(interaction) {
   const prisma = getPrisma();
-  const [_, action, postId, pageRaw] = interaction.customId.split(':');
+  const parts = interaction.customId.split(':');
+  const action = parts[1];
+  const postId = parts[2];
+  const directionOrPage = parts[3];
+  const maybePage = parts[4];
+  let pageRaw = directionOrPage;
+  if ((action === 'listlikes' || action === 'listcomments') && parts.length >= 5) {
+    pageRaw = maybePage;
+  }
   const post = await prisma.instaPostGlobal.findUnique({ where: { id: postId } });
   if (!post) {
     await interaction.reply({ content: 'Post não encontrado.', ephemeral: true });
@@ -461,39 +566,35 @@ async function handlePostButtons(interaction) {
       await prisma.instaLikeGlobal.create({ data: { postId, userId: interaction.user.id } });
     }
     const count = await prisma.instaLikeGlobal.count({ where: { postId } });
-    await prisma.instaPostGlobal.update({ where: { id: postId }, data: { likeCount: count } });
-    try {
-      const row = ActionRowBuilder.from(interaction.message.components[0]);
-      const btns = row.components.map((c) => ButtonBuilder.from(c));
-      btns[0].setLabel(String(count));
-      const newRow = new ActionRowBuilder().addComponents(btns);
-      await interaction.update({ components: [newRow] });
-    } catch {
-      await interaction.reply({ content: 'Curtida atualizada.', ephemeral: true });
+    const updatedPost = await prisma.instaPostGlobal.update({ where: { id: postId }, data: { likeCount: count } });
+    const payload = await buildPostUpdatePayload(interaction.client, updatedPost, interaction.message, updatedPost.likeCount || 0, updatedPost.commentCount || 0);
+    if (!interaction.deferred && !interaction.replied) {
+      await interaction.update(payload).catch(() => {});
+    } else {
+      await interaction.followUp({ content: 'Curtida atualizada.', ephemeral: true }).catch(() => {});
+      const channel = await interaction.client.channels.fetch(updatedPost.channelId).catch(() => null);
+      if (channel) {
+        const targetMessage = await channel.messages.fetch(postId).catch(() => null);
+        if (targetMessage) {
+          const channelPayload = await buildPostUpdatePayload(interaction.client, updatedPost, targetMessage, updatedPost.likeCount || 0, updatedPost.commentCount || 0);
+          await targetMessage.edit(channelPayload).catch(() => {});
+        }
+      }
     }
     return true;
   }
   if (action === 'comment') {
-    await interaction.reply({ content: 'Envie sua mensagem como comentário (60s).', ephemeral: true });
-    const filter = (m) => m.author.id === interaction.user.id && m.channelId === interaction.channelId;
-    const collector = interaction.channel.createMessageCollector({ filter, time: 60000, max: 1 });
-    collector.on('collect', async (m) => {
-      const content = (m.content || '').trim();
-      if (content) {
-        await prisma.instaCommentGlobal.create({ data: { postId, userId: m.author.id, content } });
-        const count = await prisma.instaCommentGlobal.count({ where: { postId } });
-        await prisma.instaPostGlobal.update({ where: { id: postId }, data: { commentCount: count } });
-        try {
-          const row = ActionRowBuilder.from(interaction.message.components[0]);
-          const btns = row.components.map((c) => ButtonBuilder.from(c));
-          btns[1].setLabel(String(count));
-          const newRow = new ActionRowBuilder().addComponents(btns);
-          await interaction.followUp({ content: 'Comentário adicionado.', ephemeral: true });
-          await interaction.message.edit({ components: [newRow] }).catch(() => {});
-        } catch {}
-      }
-      await m.delete().catch(() => {});
-    });
+    const modal = new ModalBuilder()
+      .setCustomId(`insta:commentModal:${postId}`)
+      .setTitle('Adicionar comentário');
+    const input = new TextInputBuilder()
+      .setCustomId('insta:comment:text')
+      .setLabel('Escreva seu comentário')
+      .setStyle(TextInputStyle.Paragraph)
+      .setMaxLength(500)
+      .setRequired(true);
+    modal.addComponents(new ActionRowBuilder().addComponents(input));
+    await interaction.showModal(modal);
     return true;
   }
   if (action === 'listlikes') {
@@ -508,10 +609,7 @@ async function handlePostButtons(interaction) {
       .setColor(0xFFFFFF)
       .setDescription(likes.map((l) => `<@${l.userId}>`).join('\n') || 'Sem curtidas ainda.')
       .setFooter({ text: `Página ${page}/${totalPages} - Total: ${total} likes` });
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`insta:listlikes:${postId}:${Math.max(1, page - 1)}`).setEmoji('⬅️').setStyle(ButtonStyle.Secondary).setDisabled(page <= 1),
-      new ButtonBuilder().setCustomId(`insta:listlikes:${postId}:${Math.min(totalPages, page + 1)}`).setEmoji('➡️').setStyle(ButtonStyle.Secondary).setDisabled(page >= totalPages),
-    );
+    const row = buildPaginationRow('listlikes', postId, page, totalPages);
     const method = interaction.deferred || interaction.replied ? 'followUp' : 'reply';
     await interaction[method]({ embeds: [embed], components: [row], ephemeral: true });
     return true;
@@ -529,10 +627,7 @@ async function handlePostButtons(interaction) {
       .setColor(0xFFFFFF)
       .setDescription(desc)
       .setFooter({ text: `Página ${page}/${totalPages} - Total: ${total} comentários` });
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`insta:listcomments:${postId}:${Math.max(1, page - 1)}`).setEmoji('⬅️').setStyle(ButtonStyle.Secondary).setDisabled(page <= 1),
-      new ButtonBuilder().setCustomId(`insta:listcomments:${postId}:${Math.min(totalPages, page + 1)}`).setEmoji('➡️').setStyle(ButtonStyle.Secondary).setDisabled(page >= totalPages),
-    );
+    const row = buildPaginationRow('listcomments', postId, page, totalPages);
     const method = interaction.deferred || interaction.replied ? 'followUp' : 'reply';
     await interaction[method]({ embeds: [embed], components: [row], ephemeral: true });
     return true;
@@ -549,6 +644,40 @@ async function handlePostButtons(interaction) {
     return true;
   }
   return false;
+}
+
+async function handleCommentModal(interaction) {
+  const prisma = getPrisma();
+  const parts = interaction.customId.split(':');
+  const postId = parts[2];
+  const content = interaction.fields.getTextInputValue('insta:comment:text')?.trim();
+  await interaction.deferReply({ ephemeral: true }).catch(() => {});
+  if (!postId) {
+    await interaction.editReply({ content: 'Identificador de post inválido.' }).catch(() => {});
+    return true;
+  }
+  if (!content) {
+    await interaction.editReply({ content: 'O comentário não pode estar vazio.' }).catch(() => {});
+    return true;
+  }
+  const post = await prisma.instaPostGlobal.findUnique({ where: { id: postId } });
+  if (!post) {
+    await interaction.editReply({ content: 'Post não encontrado.' }).catch(() => {});
+    return true;
+  }
+  await prisma.instaCommentGlobal.create({ data: { postId, userId: interaction.user.id, content } });
+  const count = await prisma.instaCommentGlobal.count({ where: { postId } });
+  const updatedPost = await prisma.instaPostGlobal.update({ where: { id: postId }, data: { commentCount: count } });
+  const channel = await interaction.client.channels.fetch(post.channelId).catch(() => null);
+  if (channel) {
+    const targetMessage = await channel.messages.fetch(postId).catch(() => null);
+    if (targetMessage) {
+      const payload = await buildPostUpdatePayload(interaction.client, updatedPost, targetMessage, updatedPost.likeCount || 0, count);
+      await targetMessage.edit(payload).catch(() => {});
+    }
+  }
+  await interaction.editReply({ content: 'Comentário adicionado com sucesso.' }).catch(() => {});
+  return true;
 }
 
 
@@ -592,8 +721,8 @@ async function handleMessage(message, ctx) {
     await message.delete().catch(() => {});
     return true;
   }
-  const isVerified = !!(await prisma.verifiedUserGlobal.findUnique({ where: { userId: message.author.id } }));
-  if (!isVerified) {
+  const verifiedUser = await prisma.verifiedUserGlobal.findUnique({ where: { userId: message.author.id } });
+  if (!verifiedUser) {
     await message.delete().catch(() => {});
     instaWebhookBlock.set(message.channelId, Date.now() + 6000);
     const panelId = cfg.verifyPanelChannelId;
@@ -609,6 +738,26 @@ async function handleMessage(message, ctx) {
     } catch {}
     return true;
   }
+  const requiredSex = message.channelId === cfg.instaBoysChannelId ? 'male'
+    : message.channelId === cfg.instaGirlsChannelId ? 'female'
+      : null;
+  if (requiredSex && verifiedUser.sex !== requiredSex) {
+    await message.delete().catch(() => {});
+    instaWebhookBlock.set(message.channelId, Date.now() + 6000);
+    const friendly = requiredSex === 'male' ? 'masculino' : 'feminino';
+    const channelLabel = requiredSex === 'male' ? 'InstaBoy' : 'InstaGirl';
+    const adjust = cfg.verifyPanelChannelId
+      ? ` Peça para nossa equipe em <#${cfg.verifyPanelChannelId}> atualizar seu cadastro.`
+      : '';
+    try {
+      const warn = await message.channel.send({
+        content: `<@${message.author.id}>, apenas usuários do sexo ${friendly} podem postar no ${channelLabel}. ${adjust}`.trim(),
+        allowedMentions: { users: [message.author.id], roles: [], repliedUser: false },
+      });
+      setTimeout(() => warn.delete().catch(() => {}), 8000);
+    } catch {}
+    return true;
+  }
 
   const mediaType = (att.contentType || '').startsWith('image/')
     ? 'image'
@@ -618,16 +767,22 @@ async function handleMessage(message, ctx) {
         ? 'gif'
         : 'other';
 
-  const likeBtn = new ButtonBuilder().setCustomId('insta:like:PENDING').setEmoji('❤️').setLabel('0').setStyle(ButtonStyle.Secondary);
-  const commentBtn = new ButtonBuilder().setCustomId('insta:comment:PENDING').setEmoji('💬').setLabel('0').setStyle(ButtonStyle.Secondary);
-  const listLikesBtn = new ButtonBuilder().setCustomId('insta:listlikes:PENDING:1').setEmoji('📃').setStyle(ButtonStyle.Secondary);
-  const listCommentsBtn = new ButtonBuilder().setCustomId('insta:listcomments:PENDING:1').setEmoji('📝').setStyle(ButtonStyle.Secondary);
-  const deleteBtn = new ButtonBuilder().setCustomId('insta:delete:PENDING').setEmoji('🗑️').setStyle(ButtonStyle.Danger);
-  const row = new ActionRowBuilder().addComponents(likeBtn, commentBtn, listLikesBtn, listCommentsBtn, deleteBtn);
-  const embed = new EmbedBuilder().setColor(0x2c2f33).setFooter({ text: `Autor: ${message.author.username}` });
+  const embed = new EmbedBuilder().setColor(0x2c2f33).setFooter({ text: `Autor: ${message.author.username} • ❤️ 0 • 💬 0` });
+  const files = [];
+  let downloaded = null;
   if (mediaType === 'image' || mediaType === 'gif') {
-    embed.setImage(att.url);
+    downloaded = await downloadAttachment(att);
+    if (downloaded) {
+      files.push(new AttachmentBuilder(downloaded.buffer, { name: downloaded.name }));
+      embed.setImage(`attachment://${downloaded.name}`);
+    } else {
+      embed.setImage(att.url);
+    }
+  } else if (mediaType === 'video' || mediaType === 'other') {
+    files.push({ attachment: att.url, name: att.name || `media-${Date.now()}` });
   }
+
+  const initialRow = buildPostActionRow('PENDING');
 
   const { id, token } = await getOrCreateWebhook(message.channel);
   const hook = await message.client.fetchWebhook(id, token).catch(() => null);
@@ -636,28 +791,28 @@ async function handleMessage(message, ctx) {
     username: message.member?.nickname || message.author.username,
     avatarURL: message.author.displayAvatarURL?.({ size: 128 }) || undefined,
     embeds: mediaType === 'image' || mediaType === 'gif' ? [embed] : [],
-    files: mediaType === 'video' || mediaType === 'other' ? [{ attachment: att.url, name: att.name }] : [],
-    components: [row],
+    files,
+    components: [initialRow],
   });
   await message.delete().catch(() => {});
+
+  const storedMediaUrl = sent.attachments?.first()?.url || att.url;
 
   await prisma.instaPostGlobal.create({
     data: {
       id: sent.id,
       channelId: message.channelId,
       authorId: message.author.id,
-      mediaUrl: att.url,
+      mediaUrl: storedMediaUrl,
       mediaType,
     },
   });
-  const newRow = new ActionRowBuilder().addComponents(
-    likeBtn.setCustomId(`insta:like:${sent.id}`),
-    commentBtn.setCustomId(`insta:comment:${sent.id}`),
-    listLikesBtn.setCustomId(`insta:listlikes:${sent.id}:1`),
-    listCommentsBtn.setCustomId(`insta:listcomments:${sent.id}:1`),
-    deleteBtn.setCustomId(`insta:delete:${sent.id}`),
-  );
-  await sent.edit({ components: [newRow] }).catch(() => {});
+  const finalRow = buildPostActionRow(sent.id, '0', '0');
+  try {
+    await hook.editMessage(sent.id, { components: [finalRow] });
+  } catch (error) {
+    console.warn('[insta] Não consegui atualizar os botões do post', error.message);
+  }
   return true;
 }
 

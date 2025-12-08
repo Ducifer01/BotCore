@@ -19,6 +19,8 @@ model GlobalConfig {
   instaBoysChannelId     String?
   instaGirlsChannelId    String?
   photosChannelId        String?
+  photosMaleChannelId    String?
+  photosFemaleChannelId  String?
   // Mute feature (global)
   muteVoiceRoleId        String?  // Cargo aplicado a usuários silenciados por mutecall
   muteVoiceUnlockChannelId String? // Canal de voz para desbloqueio automático
@@ -143,6 +145,7 @@ model VerifiedUserGlobal {
   userId      String   @unique
   verifiedAt  DateTime @default(now())
   verifiedBy  String?
+  sex         String?
 }
 
 // Insta global (sem guildId)

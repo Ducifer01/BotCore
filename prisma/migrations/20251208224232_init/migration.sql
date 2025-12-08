@@ -7,6 +7,8 @@ CREATE TABLE "GlobalConfig" (
     "instaBoysChannelId" TEXT,
     "instaGirlsChannelId" TEXT,
     "photosChannelId" TEXT,
+    "photosMaleChannelId" TEXT,
+    "photosFemaleChannelId" TEXT,
     "muteVoiceRoleId" TEXT,
     "muteVoiceUnlockChannelId" TEXT,
     "muteVoiceLogChannelId" TEXT,
@@ -113,7 +115,8 @@ CREATE TABLE "VerifiedUserGlobal" (
     "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
     "userId" TEXT NOT NULL,
     "verifiedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "verifiedBy" TEXT
+    "verifiedBy" TEXT,
+    "sex" TEXT
 );
 
 -- CreateTable
@@ -373,6 +376,7 @@ CREATE TABLE "VipTag" (
     "color" TEXT,
     "emoji" TEXT,
     "iconHash" TEXT,
+    "iconData" BLOB,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
     CONSTRAINT "VipTag_membershipId_fkey" FOREIGN KEY ("membershipId") REFERENCES "VipMembership" ("id") ON DELETE CASCADE ON UPDATE CASCADE
