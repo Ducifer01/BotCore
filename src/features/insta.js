@@ -628,8 +628,9 @@ async function handlePostButtons(interaction) {
     return true;
   }
   if (action === 'delete') {
+    await interaction.deferUpdate().catch(() => {});
     if (interaction.user.id !== post.authorId) {
-      await interaction.reply({ content: 'Apenas o autor pode excluir este post.', ephemeral: true });
+      await interaction.followUp({ content: 'Apenas o autor pode excluir este post.', ephemeral: true }).catch(() => {});
       return true;
     }
     await prisma.instaLikeGlobal.deleteMany({ where: { postId } });
