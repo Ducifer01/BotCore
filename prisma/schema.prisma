@@ -39,6 +39,7 @@ model GlobalConfig {
   moderationConfig     ModerationConfig?
   // Convites
   inviteTrackingEnabled   Boolean       @default(false)
+  inviteRankingEnabled    Boolean       @default(false)
   inviteRankingChannelId  String?
   inviteRankingGuildId    String?
   inviteRankingMessageId  String?

@@ -125,12 +125,17 @@ async function handleMenuButtons(interaction, ctx) {
   }
 
   if (action === 'toggle') {
+    const currentStatus = resolveRankingEnabled(cfg);
+    const nextStatus = !currentStatus;
     const updated = await prisma.globalConfig.update({
       where: { id: cfg.id },
-      data: { inviteTrackingEnabled: !cfg.inviteTrackingEnabled },
+      data: {
+        inviteRankingEnabled: nextStatus,
+        inviteTrackingEnabled: nextStatus,
+      },
     });
     await refreshRuntimeState(prisma, updated);
-    if (!updated.inviteTrackingEnabled) {
+    if (!nextStatus) {
       await renderRankingDisabled();
     } else {
       await ensureRankingPanel(prisma);
@@ -138,7 +143,7 @@ async function handleMenuButtons(interaction, ctx) {
     }
     return renderHome(interaction, updated, {
       type: 'success',
-      message: `Sistema ${updated.inviteTrackingEnabled ? 'ativado' : 'desativado'}.`,
+      message: `Sistema ${nextStatus ? 'ativado' : 'desativado'}.`,
     });
   }
 
@@ -173,14 +178,6 @@ async function handleMenuButtons(interaction, ctx) {
 
   if (action === 'resetcancel') {
     return renderHome(interaction, cfg, { type: 'info', message: 'Reset cancelado.' });
-  }
-
-  if (action === 'refresh') {
-    const ok = await enqueueRankingRefresh('manual');
-    const status = ok
-      ? { type: 'success', message: 'Ranking será atualizado em instantes.' }
-      : { type: 'error', message: 'Não há ranking ativo ou o canal não está configurado.' };
-    return renderHome(interaction, cfg, status);
   }
 
   if (action === 'home') {
@@ -224,9 +221,6 @@ async function handleRankingButtons(interaction) {
     state.page = Math.max(1, state.page - 1);
   } else if (customId === 'inviteRank:next') {
     state.page = Math.min(state.totalPages, state.page + 1);
-  } else if (customId === 'inviteRank:refresh') {
-    await enqueueRankingRefresh('button');
-    return true;
   }
 
   rankingViewState.set(messageId, state);
@@ -252,13 +246,20 @@ async function renderHome(interaction, cfg, status) {
   return true;
 }
 
+function resolveRankingEnabled(cfg) {
+  if (typeof cfg?.inviteRankingEnabled === 'boolean') {
+    return cfg.inviteRankingEnabled;
+  }
+  return Boolean(cfg?.inviteTrackingEnabled);
+}
+
 function buildInviteEmbed(cfg, totalStats, status) {
+  const rankingEnabled = resolveRankingEnabled(cfg);
   const lines = [];
-  lines.push(`Status: **${cfg.inviteTrackingEnabled ? 'Ativo' : 'Inativo'}**`);
+  lines.push(`Status: **${rankingEnabled ? 'Ativo' : 'Inativo'}**`);
   lines.push(`Canal: ${cfg.inviteRankingChannelId ? `<#${cfg.inviteRankingChannelId}>` : 'não definido'}`);
   lines.push(`Entradas registradas: **${totalStats}**`);
-  lines.push(`Última atualização: ${cfg.inviteRankingLastRefresh ? formatRelative(new Date(cfg.inviteRankingLastRefresh)) : 'nunca'}`);
-  const nextText = cfg.inviteTrackingEnabled && nextRefreshAt
+  const nextText = rankingEnabled && nextRefreshAt
     ? formatRelative(nextRefreshAt)
     : 'quando o sistema estiver ativo';
   lines.push(`Próxima atualização: ${nextText}`);
@@ -266,18 +267,18 @@ function buildInviteEmbed(cfg, totalStats, status) {
   return new EmbedBuilder()
     .setTitle('Configurar Ranking de Convites')
     .setDescription(`${descPrefix}${lines.join('\n')}`)
-    .setColor(cfg.inviteTrackingEnabled ? 0x57F287 : 0xED4245);
+    .setColor(rankingEnabled ? 0x57F287 : 0xED4245);
 }
 
 function buildHomeComponents(cfg) {
-  const toggleLabel = cfg.inviteTrackingEnabled ? 'Desativar Sistema' : 'Ativar Sistema';
-  const toggleStyle = cfg.inviteTrackingEnabled ? ButtonStyle.Danger : ButtonStyle.Success;
+  const rankingEnabled = resolveRankingEnabled(cfg);
+  const toggleLabel = rankingEnabled ? 'Desativar Sistema' : 'Ativar Sistema';
+  const toggleStyle = rankingEnabled ? ButtonStyle.Danger : ButtonStyle.Success;
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('menu:back').setLabel('Voltar').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('menu:invite:toggle').setLabel(toggleLabel).setStyle(toggleStyle),
       new ButtonBuilder().setCustomId('menu:invite:channel').setLabel('Definir Canal').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('menu:invite:refresh').setLabel('Atualizar Ranking').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('menu:invite:reset').setLabel('Resetar Rank').setStyle(ButtonStyle.Danger),
     ),
   ];
@@ -349,7 +350,7 @@ async function refreshRuntimeState(prisma = getPrisma(), forcedConfig) {
     cfg = (await getGlobalConfig(prisma)) || (await ensureGlobalConfig(prisma));
   }
   runtime.globalConfigId = cfg.id;
-  runtime.enabled = Boolean(cfg.inviteTrackingEnabled);
+  runtime.enabled = resolveRankingEnabled(cfg);
   runtime.channelId = cfg.inviteRankingChannelId || null;
   runtime.guildId = cfg.inviteRankingGuildId || null;
   runtime.messageId = cfg.inviteRankingMessageId || null;
@@ -567,9 +568,6 @@ async function buildRankingPayload({ page = 1, guildId }) {
     .setDescription(lines.join('\n'))
     .setColor(entries.length ? 0x5865F2 : 0x2b2d31)
     .setFooter({ text: `Página ${page}/${totalPages}` });
-  if (runtime.lastRefresh) {
-    embed.addFields({ name: 'Última atualização', value: formatRelative(runtime.lastRefresh), inline: true });
-  }
   const nextField = runtime.enabled && nextRefreshAt
     ? formatRelative(nextRefreshAt)
     : 'quando o sistema estiver ativo';
@@ -586,11 +584,6 @@ async function buildRankingPayload({ page = 1, guildId }) {
         .setEmoji('➡️')
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(page >= totalPages || !runtime.enabled),
-      new ButtonBuilder()
-        .setCustomId('inviteRank:refresh')
-        .setLabel('Atualizar agora')
-        .setStyle(ButtonStyle.Primary)
-        .setDisabled(!runtime.enabled),
     ),
   ];
   return { embeds: [embed], components, totalPages };
