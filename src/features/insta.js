@@ -32,38 +32,6 @@ function buildPaginationRow(type, postId, page, totalPages) {
   );
 }
 
-function extractAuthorLabel(text) {
-  if (!text) return '';
-  const match = text.match(/Autor:\s*([^•]+)/i);
-  if (match && match[1]) return match[1].trim();
-  if (text.includes('•')) {
-    return text.split('•')[0].replace(/Autor:/i, '').trim();
-  }
-  return text.trim();
-}
-
-async function resolveAuthorLabel(client, post, footerText) {
-  const existing = extractAuthorLabel(footerText);
-  if (existing) return existing;
-  const user = await client.users.fetch(post.authorId).catch(() => null);
-  if (user) return user.username;
-  return `ID:${post.authorId}`;
-}
-
-async function buildPostUpdatePayload(client, post, messageLike, likeCount, commentCount) {
-  const payload = {
-    components: [buildPostActionRow(post.id, String(likeCount || 0), String(commentCount || 0))],
-  };
-  const embedData = messageLike?.embeds?.[0];
-  if (!embedData) {
-    return payload;
-  }
-  const embed = EmbedBuilder.from(embedData);
-  const authorLabel = await resolveAuthorLabel(client, post, embedData.footer?.text || '');
-  embed.setFooter({ text: `Autor: ${authorLabel} • ❤️ ${likeCount || 0} • 💬 ${commentCount || 0}` });
-  payload.embeds = [embed];
-  return payload;
-}
 
 function guessAttachmentExtension(contentType) {
   if (!contentType) return '.png';
@@ -542,6 +510,35 @@ async function performInstaReset(interaction, prisma) {
   return renderHome(interaction, prisma, { type: 'success', message });
 }
 
+async function updatePostComponents(client, post, likeCount, commentCount, options = {}) {
+  const { message, channel } = options;
+  const payload = {
+    components: [buildPostActionRow(post.id, String(likeCount || 0), String(commentCount || 0))],
+  };
+  if (message) {
+    const ok = await message.edit(payload).then(() => true).catch(() => false);
+    if (ok) return true;
+  }
+  const resolvedChannel = channel || await client.channels.fetch(post.channelId).catch(() => null);
+  if (!resolvedChannel) return false;
+  const fetchedMessage = await resolvedChannel.messages.fetch(post.id).catch(() => null);
+  if (fetchedMessage) {
+    const ok = await fetchedMessage.edit(payload).then(() => true).catch(() => false);
+    if (ok) return true;
+  }
+  try {
+    const { id, token } = await getOrCreateWebhook(resolvedChannel);
+    const hook = await client.fetchWebhook(id, token).catch(() => null);
+    if (hook) {
+      await hook.editMessage(post.id, payload).catch(() => {});
+      return true;
+    }
+  } catch (error) {
+    console.warn('[insta] Falha ao atualizar botões do post', error.message);
+  }
+  return false;
+}
+
 async function handlePostButtons(interaction) {
   const prisma = getPrisma();
   const parts = interaction.customId.split(':');
@@ -567,19 +564,17 @@ async function handlePostButtons(interaction) {
     }
     const count = await prisma.instaLikeGlobal.count({ where: { postId } });
     const updatedPost = await prisma.instaPostGlobal.update({ where: { id: postId }, data: { likeCount: count } });
-    const payload = await buildPostUpdatePayload(interaction.client, updatedPost, interaction.message, updatedPost.likeCount || 0, updatedPost.commentCount || 0);
+    const likeValue = updatedPost.likeCount || 0;
+    const commentValue = updatedPost.commentCount || 0;
+    const rowPayload = { components: [buildPostActionRow(postId, String(likeValue), String(commentValue))] };
     if (!interaction.deferred && !interaction.replied) {
-      await interaction.update(payload).catch(() => {});
+      const updated = await interaction.update(rowPayload).then(() => true).catch(() => false);
+      if (!updated) {
+        await updatePostComponents(interaction.client, updatedPost, likeValue, commentValue, { message: interaction.message });
+      }
     } else {
       await interaction.followUp({ content: 'Curtida atualizada.', ephemeral: true }).catch(() => {});
-      const channel = await interaction.client.channels.fetch(updatedPost.channelId).catch(() => null);
-      if (channel) {
-        const targetMessage = await channel.messages.fetch(postId).catch(() => null);
-        if (targetMessage) {
-          const channelPayload = await buildPostUpdatePayload(interaction.client, updatedPost, targetMessage, updatedPost.likeCount || 0, updatedPost.commentCount || 0);
-          await targetMessage.edit(channelPayload).catch(() => {});
-        }
-      }
+      await updatePostComponents(interaction.client, updatedPost, likeValue, commentValue);
     }
     return true;
   }
@@ -669,13 +664,7 @@ async function handleCommentModal(interaction) {
   const count = await prisma.instaCommentGlobal.count({ where: { postId } });
   const updatedPost = await prisma.instaPostGlobal.update({ where: { id: postId }, data: { commentCount: count } });
   const channel = await interaction.client.channels.fetch(post.channelId).catch(() => null);
-  if (channel) {
-    const targetMessage = await channel.messages.fetch(postId).catch(() => null);
-    if (targetMessage) {
-      const payload = await buildPostUpdatePayload(interaction.client, updatedPost, targetMessage, updatedPost.likeCount || 0, count);
-      await targetMessage.edit(payload).catch(() => {});
-    }
-  }
+  await updatePostComponents(interaction.client, updatedPost, updatedPost.likeCount || 0, count, { channel });
   await interaction.editReply({ content: 'Comentário adicionado com sucesso.' }).catch(() => {});
   return true;
 }
@@ -767,7 +756,7 @@ async function handleMessage(message, ctx) {
         ? 'gif'
         : 'other';
 
-  const embed = new EmbedBuilder().setColor(0x2c2f33).setFooter({ text: `Autor: ${message.author.username} • ❤️ 0 • 💬 0` });
+  const embed = new EmbedBuilder().setColor(0x2c2f33).setFooter({ text: `Autor: ${message.author.username}` });
   const files = [];
   let downloaded = null;
   if (mediaType === 'image' || mediaType === 'gif') {
