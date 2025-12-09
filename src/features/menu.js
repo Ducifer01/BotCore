@@ -17,10 +17,11 @@ function buildRootSelect() {
       { label: 'Configurar Suporte', value: 'support', description: 'Painel, cargos e logs do suporte' },
       { label: 'Configurar AutoMod', value: 'automod', description: 'Palavras bloqueadas e punições' },
   { label: 'Configurar Moderação', value: 'moderation', description: 'Banimentos, castigos e permissões' },
+      { label: 'Configurar Convites', value: 'invites', description: 'Ranking e monitoramento de convites' },
     ]);
 }
 
-function createMenuHandler({ insta, mute, support, automod, moderation }) {
+function createMenuHandler({ insta, mute, support, automod, moderation, invites }) {
   async function handleInteraction(interaction, ctx) {
     if (interaction.isStringSelectMenu() && interaction.customId === 'menu:root') {
       return handleRootSelection(interaction, ctx);
@@ -52,6 +53,9 @@ function createMenuHandler({ insta, mute, support, automod, moderation }) {
     }
     if (choice === 'moderation') {
       return moderation.presentMenu(interaction, ctx);
+    }
+    if (choice === 'invites') {
+      return invites.presentMenu(interaction, ctx);
     }
     return false;
   }

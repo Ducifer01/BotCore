@@ -31,7 +31,8 @@ module.exports = {
   { label: 'Configurar Mute', value: 'mute', description: 'Cargos, logs e permissões para mute de voz/chat' },
         { label: 'Configurar Suporte', value: 'support', description: 'Painel, cargos e logs do suporte' },
         { label: 'Configurar AutoMod', value: 'automod', description: 'Palavras bloqueadas e punições automáticas' },
-        { label: 'Configurar Moderação', value: 'moderation', description: 'Banimentos, castigos e permissões' }
+        { label: 'Configurar Moderação', value: 'moderation', description: 'Banimentos, castigos e permissões' },
+        { label: 'Configurar Convites', value: 'invites', description: 'Sistema de convites e ranking' }
       ]);
     const row = new ActionRowBuilder().addComponents(menu);
     await interaction.editReply({ embeds: [baseEmbed], components: [row] });

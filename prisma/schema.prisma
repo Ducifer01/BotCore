@@ -37,6 +37,14 @@ model GlobalConfig {
   autoModConfig        AutoModConfig?
   // Moderação
   moderationConfig     ModerationConfig?
+  // Convites
+  inviteTrackingEnabled   Boolean       @default(false)
+  inviteRankingChannelId  String?
+  inviteRankingGuildId    String?
+  inviteRankingMessageId  String?
+  inviteRankingLastRefresh DateTime?
+  inviteStats              InviteStat[]
+  inviteEvents             InviteEvent[]
   // Mute config avançada
   mutePermissions      MutePermission[]
   voiceMutes           VoiceMute[]
@@ -112,6 +120,38 @@ model ModerationPermission {
   config              ModerationConfig  @relation(fields: [moderationConfigId], references: [id], onDelete: Cascade)
 
   @@unique([moderationConfigId, commandType, roleId])
+}
+
+model InviteStat {
+  id              Int      @id @default(autoincrement())
+  globalConfigId  Int
+  guildId         String
+  inviterId       String
+  inviterTag      String?
+  inviteCode      String?
+  uses            Int      @default(0)
+  lastJoinedUserId String?
+  lastJoinAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  config          GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([globalConfigId, guildId, inviterId])
+  @@index([guildId, uses])
+}
+
+model InviteEvent {
+  id             Int      @id @default(autoincrement())
+  globalConfigId Int
+  guildId        String
+  userId         String
+  inviterId      String?
+  inviterTag     String?
+  inviteCode     String?
+  createdAt      DateTime @default(now())
+  config         GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
+
+  @@index([guildId, inviterId])
 }
 
 model MutePermission {

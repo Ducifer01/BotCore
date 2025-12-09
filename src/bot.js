@@ -19,6 +19,7 @@ const autoModFeature = require('./features/autoMod');
 const moderationConfig = require('./features/moderationConfig');
 const moderationCommands = require('./features/moderationCommands');
 const muteCommands = require('./features/muteCommands');
+const inviteTrackerFeature = require('./features/inviteTracker');
 const { ALLOWED_GUILD_IDS, isGuildAllowed } = require('./config');
 
 const client = new Client({ intents: [
@@ -45,12 +46,19 @@ try {
   console.warn('[init] Mute feature não carregada:', e?.message || e);
 }
 
+try {
+  inviteTrackerFeature.registerInviteTracker(client, { isGuildAllowed });
+} catch (e) {
+  console.warn('[init] Invite tracker não carregado:', e?.message || e);
+}
+
 const menuHandler = createMenuHandler({
   insta: { presentMenu: instaFeature.presentMenu },
   mute: { presentMenu: muteConfig.presentMenu },
   support: { presentMenu: supportConfig.presentMenu },
   automod: { presentMenu: autoModFeature.presentMenu },
   moderation: { presentMenu: moderationConfig.presentMenu },
+  invites: { presentMenu: inviteTrackerFeature.presentMenu },
 });
 
 const interactionFeatures = [
@@ -65,6 +73,7 @@ const interactionFeatures = [
   syncFeature,
   autoModFeature,
   moderationConfig,
+  inviteTrackerFeature,
   { handleInteraction: handleSupportInteraction },
 ];
 
