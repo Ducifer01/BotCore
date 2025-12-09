@@ -16,12 +16,6 @@ async function getGlobalConfig(prisma = getPrisma()) {
           permissions: true,
         },
       },
-      vipConfig: {
-        include: {
-          setPermissions: true,
-          plans: true,
-        },
-      },
     },
   });
   return cfg || null;
@@ -31,11 +25,6 @@ async function ensureGlobalConfig(prisma = getPrisma()) {
   let cfg = await prisma.globalConfig.findFirst();
   if (!cfg) {
     cfg = await prisma.globalConfig.create({ data: {} });
-  }
-  const vipExists = await prisma.vipConfig.findUnique({ where: { globalConfigId: cfg.id } });
-  if (!vipExists) {
-    await prisma.vipConfig.create({ data: { globalConfigId: cfg.id } });
-    cfg = await prisma.globalConfig.findUnique({ where: { id: cfg.id }, include: { vipConfig: true } });
   }
   return cfg;
 }

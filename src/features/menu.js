@@ -16,12 +16,11 @@ function buildRootSelect() {
       { label: 'Configurar Mute', value: 'mute', description: 'Cargo mutado, canal de desbloqueio e bot responsável' },
       { label: 'Configurar Suporte', value: 'support', description: 'Painel, cargos e logs do suporte' },
       { label: 'Configurar AutoMod', value: 'automod', description: 'Palavras bloqueadas e punições' },
-      { label: 'Configurar Moderação', value: 'moderation', description: 'Banimentos, castigos e permissões' },
-      { label: 'Configurar VIP', value: 'vip', description: 'Planos, cargos e canais VIP' },
+  { label: 'Configurar Moderação', value: 'moderation', description: 'Banimentos, castigos e permissões' },
     ]);
 }
 
-function createMenuHandler({ insta, mute, support, automod, moderation, vip }) {
+function createMenuHandler({ insta, mute, support, automod, moderation }) {
   async function handleInteraction(interaction, ctx) {
     if (interaction.isStringSelectMenu() && interaction.customId === 'menu:root') {
       return handleRootSelection(interaction, ctx);
@@ -53,9 +52,6 @@ function createMenuHandler({ insta, mute, support, automod, moderation, vip }) {
     }
     if (choice === 'moderation') {
       return moderation.presentMenu(interaction, ctx);
-    }
-    if (choice === 'vip') {
-      return vip.presentMenu(interaction, ctx);
     }
     return false;
   }

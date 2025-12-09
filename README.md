@@ -75,25 +75,6 @@ Fluxo:
 - Ao encerrar, o bot envia mensagem ephemeral “Encerrando Ticket”, gera uma transcrição HTML com `discord-html-transcripts`, publica no canal de log e remove o tópico.
 - O embed no log é vermelho, com título “:Planilha: | Ticket suporte”, lista quem abriu/fechou e traz o horário nativo do Discord no rodapé.
 
-### Sistema de VIPs
-- Abra `/menu` e selecione **Configurar VIP** para definir:
-	- **Cargo bônus** (opcional) aplicado automaticamente a todo membro com VIP ativo.
-	- **Permitir tags manuais** (on/off) para liberar o uso de `/addvip` e `/removevip` fora do menu principal.
-	- **Criar/editar planos** com nome, descrição, duração e status (rascunho/publicado). Somente planos publicados aparecem no `/setvip`.
-	- **Permissões do `/setvip`** permitindo delegar o comando para cargos específicos além de Administrator/ManageGuild.
-	- **Esconder canais vazios** para alternar entre canais exclusivos (aparecem só quando ocupados) ou permanentes.
-- Comandos principais:
-	- `/setvip membro:<usuário>` — abre embed com os planos publicados; ao clicar, o plano é aplicado e o VIP é associado ao usuário. Caso já possua VIP ativo, um embed vermelho orienta a usar `/administrar_vips` para ajustes.
-	- `/administrar_vips` — painel de staff com botões para **Listar VIPs** (paginação de 10 em 10), **Ver VIP** (informa ID no chat), **Adicionar dias** (solicita quantidade no chat) e **Remover VIP**. Todas as respostas são ephemerais e possuem botão “Voltar” para retornar ao painel inicial.
-	- `/vip` — mostra para o usuário status do VIP, plano, dias restantes e oferece botões **Editar Tag**, **Editar Canal** e **Fechar**.
-	- `/addvip` / `/removevip` — adicionam ou removem usuários extras na tag VIP do titular (respeitando o limite do plano e a opção “Permitir tags manuais”).
-	- `/addvipc` / `/removevipc` — controlam o acesso de convidados ao canal VIP criado automaticamente para cada titular.
-- Fluxos de interação:
-	- **Editar tag**: o bot pede no chat o novo texto (até 32 caracteres, sem menções). A tag é aplicada nos canais configurados e salva para reaproveitamento ao reconectar.
-	- **Editar canal**: cria/atualiza um canal de voz privado por titular (categoria opcional) e exibe botões para adicionar/remover convidados e “Desbugar” (reaplica permissões oficiais do plano).
-	- **Canais VIP**: quando “Esconder canais vazios” está ativo, o bot remove a permissão `ViewChannel` de todos quando o canal fica vazio e habilita novamente assim que alguém entra. Se desativado, os canais ficam sempre visíveis, mas apenas o titular e convidados conseguem conectar.
-- Todo histórico fica registrado nas tabelas `VipMembership`, `VipTag`, `VipChannel` e `VipMembershipLog`. Expirações são verificadas periodicamente; ao vencer, o bot remove cargos, derruba permissões do canal/tag e registra o log de remoção automaticamente.
-
 ### Insta boys/girls
 - `/config_insta [boys:<canal>] [girls:<canal>]` — define os canais de insta.
 - `/reset_insta` — confirma e, para cada canal configurado, anuncia o post com mais curtidas como "Ganhador da semana" e limpa os demais posts (preserva anúncios de ganhadores anteriores).
