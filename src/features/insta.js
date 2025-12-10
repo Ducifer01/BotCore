@@ -1,6 +1,7 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelSelectMenuBuilder, RoleSelectMenuBuilder, UserSelectMenuBuilder, ChannelType, AttachmentBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelSelectMenuBuilder, RoleSelectMenuBuilder, UserSelectMenuBuilder, ChannelType, AttachmentBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, AuditLogEvent } = require('discord.js');
 const { getGlobalConfig, ensureGlobalConfig } = require('../services/globalConfig');
 const { getPrisma } = require('../db');
+const { consumeBotVerifiedRoleAction } = require('../services/verifiedRoleBypass');
 
 const webhookCache = new Map();
 const instaWebhookBlock = new Map();
@@ -813,10 +814,34 @@ async function handleGuildMemberUpdate(oldMember, newMember) {
   const had = oldMember.roles.cache.has(cfg.verifiedRoleId);
   const has = newMember.roles.cache.has(cfg.verifiedRoleId);
   if (!had && has) {
+    if (consumeBotVerifiedRoleAction(newMember.guild.id, newMember.id)) {
+      return false;
+    }
+    if (await wasVerifiedRoleAddByBot(newMember.guild, newMember.id, cfg.verifiedRoleId)) {
+      return false;
+    }
     const exists = await prisma.verifiedUserGlobal.findUnique({ where: { userId: newMember.id } });
     if (!exists) {
       await newMember.roles.remove(cfg.verifiedRoleId).catch(() => {});
     }
+  }
+  return false;
+}
+
+async function wasVerifiedRoleAddByBot(guild, targetUserId, roleId) {
+  if (!guild?.client?.user?.id) return false;
+  try {
+    const logs = await guild.fetchAuditLogs({ type: AuditLogEvent.MemberRoleUpdate, limit: 5 });
+    for (const [, entry] of logs.entries) {
+      if (entry.executorId !== guild.client.user.id) continue;
+      if (entry.target?.id !== targetUserId) continue;
+      const addedRoles = entry.changes?.find((change) => change.key === '$add')?.new;
+      if (Array.isArray(addedRoles) && addedRoles.some((r) => r.id === roleId)) {
+        return true;
+      }
+    }
+  } catch (err) {
+    console.warn('[verify-protect] Falha ao consultar audit log para ver cargo verificado:', err?.message || err);
   }
   return false;
 }

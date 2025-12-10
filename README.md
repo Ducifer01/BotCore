@@ -84,6 +84,9 @@ Notas rápidas:
  - `/nuke_all categoria:<categoria>` — apaga e recria todos os canais da categoria, um por um, preservando nome e permissões.
  - `/editar_cargo id:<id>` — abre painel para editar nome/emoji de um cargo (somente usuários permitidos pelo banco).
  - `/copiar_perm_cargo origem:<cargo> destino:<cargo>` — copia bitfield de permissões de um cargo para outro.
+- `!info <id/menção>` — mostra status de verificação, estatísticas de mensagens/voz e lista de cargos do usuário.
+- `!remover_verificado <id/menção>` — abre confirmação com botões para remover o registro e o cargo de verificado.
+- `!verificado <id/menção>` — exibe embed com quem verificou, status atual e foto arquivada (somente cargos autorizados).
 
 ### Verificação de usuários
 - `/config_verificacao [cargo_principal] [cargo_verificado] [canal_painel] [mencionar_1..3]` — configura cargos e canal do painel; você pode rodar várias vezes para ajustar.
@@ -91,9 +94,11 @@ Notas rápidas:
 
 Fluxo:
 - Somente o cargo principal pode usar os botões "Verificar" e "Encerrar" dentro do tópico.
-- Ao clicar em "Verificar", o verificador envia uma imagem no tópico; o bot mostra uma prévia (ephemeral) com botões "Perfeito" e "Atualizar".
-- Em "Perfeito": o bot aplica o cargo de verificado, registra no banco e envia um resumo no tópico (menções, IDs e a imagem anexada).
+- Ao clicar em "Verificar", o verificador envia uma imagem no tópico; o bot publica uma prévia pública (com botões "Perfeito" e "Atualizar") que é editada em tempo real.
+- Em "Perfeito": o bot aplica automaticamente o cargo de verificado, salva quem verificou, o sexo e a URL da foto no banco e remove a prévia imediatamente.
+- Usuários que já possuem verificação recebem um aviso ao tentar abrir novo ticket, junto ao botão "Cargo Verificado" para reaplicar o cargo caso esteja faltando.
 - Se o cargo de verificado for adicionado manualmente em alguém não registrado, o bot remove automaticamente.
+- O bot registra automaticamente a contagem de mensagens e o tempo total em chamadas de voz para cada usuário, permitindo que `!info` e `!verificado` exibam métricas atualizadas.
 
 ### Sistema de suporte
 - Acesse `/menu` e escolha **Configurar Suporte** para definir:

@@ -1,6 +1,8 @@
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { runBan, runUnban, runCastigo, runRemoveCastigo, resolveTargetUser } = require('../actions/moderationActions');
 const { COMMAND_TYPES, ensureModerationConfig, memberHasPermission } = require('../lib/moderation');
+const { getGlobalConfig } = require('../services/globalConfig');
+const { getUserStats } = require('../services/userStats');
 
 const PREFIX = '!';
 const TEMP_MESSAGE_TTL = 15000;
@@ -106,6 +108,13 @@ function isDurationToken(token) {
   return /^\d+(s|m|h|d|w)$/i.test(String(token).trim());
 }
 
+function hasVerifyPermission(member, cfg, posseId) {
+  if (!member) return false;
+  if (posseId && member.id === posseId) return true;
+  if (!cfg?.mainRoleId) return false;
+  return member.roles.cache.has(cfg.mainRoleId);
+}
+
 async function sendTemporaryMessage(channel, payload, ttl = TEMP_MESSAGE_TTL) {
   if (!channel || typeof channel.send !== 'function') return null;
   const body = typeof payload === 'string' ? { content: payload } : payload;
@@ -123,6 +132,9 @@ const COMMAND_HANDLERS = {
   castigo: handlePrefixCastigo,
   removercastigo: handlePrefixRemoveCastigo,
   ping: handlePingCommand,
+  info: handleInfoCommand,
+  remover_verificado: handleRemoveVerifiedCommand,
+  verificado: handleVerificadoCommand,
 };
 
 const pingCooldowns = new Map();
@@ -295,6 +307,130 @@ function getLatencyFeedback(value) {
     return { label: 'Ruim', emoji: '🟠', color: 0xf97316 };
   }
   return { label: 'Péssimo', emoji: '🔴', color: 0xef4444 };
+}
+
+async function handleInfoCommand(message, args, prisma) {
+  if (!message.guild) throw new Error('Este comando só funciona em servidores.');
+  if (!args.length) {
+    throw new CommandUsageError('Informe o usuário. ex: !info @usuario', 'info');
+  }
+  const targetToken = args[0];
+  const targetId = extractId(targetToken);
+  if (!targetId) {
+    throw new CommandUsageError('Informe o usuário. ex: !info @usuario', 'info');
+  }
+  const member = await message.guild.members.fetch(targetId).catch(() => null);
+  if (!member) {
+    throw new Error('Usuário não encontrado no servidor.');
+  }
+  const [stats, verifyRecord] = await Promise.all([
+    getUserStats(prisma, message.guildId, member.id),
+    prisma.verifiedUserGlobal.findUnique({ where: { userId: member.id } }),
+  ]);
+  const messageCount = stats?.messageCount || 0;
+  const voiceHours = ((stats?.voiceSeconds || 0) / 3600).toFixed(2);
+  const everyoneId = message.guild.roles.everyone.id;
+  const roles = member.roles.cache
+    .filter((role) => role.id !== everyoneId)
+    .sort((a, b) => b.position - a.position)
+    .map((role) => `<@&${role.id}>`);
+  const rolesText = roles.length ? roles.join(', ') : 'Nenhum cargo listado.';
+  const description = [
+    `Informações de <@${member.id}>`,
+    `${messageCount} mensagens registradas`,
+    `${voiceHours} horas em call`,
+    '',
+    `Cargos: ${rolesText}`,
+  ].join('\n');
+  const embed = new EmbedBuilder()
+    .setTitle(member.user.username)
+    .setDescription(description)
+    .addFields({ name: 'Status de verificação', value: verifyRecord ? 'Verificado' : 'Não verificado' })
+    .setThumbnail(member.displayAvatarURL({ size: 256 }))
+    .setFooter({
+      text: `Comando executado por ${message.member?.displayName || message.author.username}`,
+      iconURL: message.author.displayAvatarURL({ size: 64 }),
+    })
+    .setColor(verifyRecord ? 0x2ECC71 : 0xE74C3C);
+  await message.channel.send({ embeds: [embed] });
+}
+
+async function handleRemoveVerifiedCommand(message, args, prisma, posseId) {
+  if (!message.guild) throw new Error('Este comando só funciona em servidores.');
+  if (!args.length) {
+    throw new CommandUsageError('Informe o usuário. ex: !remover_verificado @usuario', 'remover_verificado');
+  }
+  const targetId = extractId(args[0]);
+  if (!targetId) {
+    throw new CommandUsageError('Informe um usuário válido. ex: !remover_verificado @usuario', 'remover_verificado');
+  }
+  const cfg = await getGlobalConfig(prisma);
+  if (!cfg?.mainRoleId) {
+    throw new Error('Sistema de verificação não está configurado.');
+  }
+  if (!hasVerifyPermission(message.member, cfg, posseId)) {
+    throw new PermissionError('Você não tem permissão para remover verificações.');
+  }
+  const record = await prisma.verifiedUserGlobal.findUnique({ where: { userId: targetId } }).catch(() => null);
+  if (!record) {
+    await sendTemporaryMessage(message.channel, 'Este usuário não está verificado.');
+    return;
+  }
+  const embed = new EmbedBuilder()
+    .setTitle('Remover verificação')
+    .setDescription(`Deseja remover a verificação do usuário <@${targetId}> | ${targetId} do banco de dados?`)
+    .setColor(0xE74C3C);
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`verify:remove:confirm:${targetId}:${message.author.id}`)
+      .setLabel('Remover')
+      .setStyle(ButtonStyle.Danger),
+    new ButtonBuilder()
+      .setCustomId(`verify:remove:cancel:${targetId}:${message.author.id}`)
+      .setLabel('Cancelar')
+      .setStyle(ButtonStyle.Secondary),
+  );
+  await message.channel.send({ content: `<@${message.author.id}>`, embeds: [embed], components: [row] });
+}
+
+async function handleVerificadoCommand(message, args, prisma, posseId) {
+  if (!message.guild) throw new Error('Este comando só funciona em servidores.');
+  if (!args.length) {
+    throw new CommandUsageError('Informe o usuário. ex: !verificado @usuario', 'verificado');
+  }
+  const targetId = extractId(args[0]);
+  if (!targetId) {
+    throw new CommandUsageError('Informe um usuário válido. ex: !verificado @usuario', 'verificado');
+  }
+  const cfg = await getGlobalConfig(prisma);
+  if (!hasVerifyPermission(message.member, cfg, posseId)) {
+    throw new PermissionError('Apenas cargos autorizados podem usar este comando.');
+  }
+  const member = await message.guild.members.fetch(targetId).catch(() => null);
+  if (!member) {
+    throw new Error('Usuário não encontrado no servidor.');
+  }
+  const record = await prisma.verifiedUserGlobal.findUnique({ where: { userId: member.id } }).catch(() => null);
+  const embed = new EmbedBuilder()
+    .setTitle(member.user.username)
+    .setDescription(`Informações sobre o usuário ${member.user.username}`)
+    .addFields(
+      { name: 'Membro', value: `<@${member.id}> | ${member.id}`, inline: true },
+      { name: 'Status', value: record ? 'Verificado' : 'Não verificado', inline: true },
+      { name: 'Verificado por', value: record?.verifiedBy ? `<@${record.verifiedBy}> | ${record.verifiedBy}` : '—', inline: true },
+    )
+    .setThumbnail(member.displayAvatarURL({ size: 256 }))
+    .setColor(record ? 0x2ECC71 : 0xE74C3C);
+  if (record?.photoUrl) {
+    embed.setImage(record.photoUrl);
+  }
+  const sent = await message.channel.send({ embeds: [embed] });
+
+  // Apagar depois de 10 segundos
+  setTimeout(() => {
+    sent.delete().catch(() => {});
+  }, 10000);
+
 }
 
 module.exports = { handleMessage };

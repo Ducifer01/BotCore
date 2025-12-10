@@ -21,6 +21,7 @@ const moderationCommands = require('./features/moderationCommands');
 const muteCommands = require('./features/muteCommands');
 const inviteTrackerFeature = require('./features/inviteTracker');
 const channelCleanerFeature = require('./features/channelCleaner');
+const userStatsFeature = require('./features/userStats');
 const { ALLOWED_GUILD_IDS, isGuildAllowed } = require('./config');
 
 const client = new Client({ intents: [
@@ -86,7 +87,7 @@ const interactionFeatures = [
   { handleInteraction: handleSupportInteraction },
 ];
 
-const messageFeatures = [autoModFeature, roleEditorFeature, instaFeature, moderationCommands, muteCommands];
+const messageFeatures = [userStatsFeature, autoModFeature, roleEditorFeature, instaFeature, moderationCommands, muteCommands];
 const guildUpdateFeatures = [instaFeature];
 
 function buildHandlerContext() {
@@ -222,6 +223,19 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
     for (const feature of guildUpdateFeatures) {
       if (typeof feature.handleGuildMemberUpdate !== 'function') continue;
       await feature.handleGuildMemberUpdate(oldMember, newMember, ctx);
+    }
+  } catch (err) {
+    console.error(err);
+  }
+});
+
+client.on('voiceStateUpdate', async (oldState, newState) => {
+  try {
+    const guildId = newState.guild?.id || oldState.guild?.id;
+    if (!guildId || !isGuildAllowed(guildId)) return;
+    const ctx = buildHandlerContext();
+    if (typeof userStatsFeature.handleVoiceStateUpdate === 'function') {
+      await userStatsFeature.handleVoiceStateUpdate(oldState, newState, ctx);
     }
   } catch (err) {
     console.error(err);

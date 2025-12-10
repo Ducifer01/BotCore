@@ -209,6 +209,24 @@ model VerifiedUserGlobal {
   verifiedAt  DateTime @default(now())
   verifiedBy  String?
   sex         String?
+  photoUrl    String?
+  photoMessageId String?
+  photoChannelId String?
+}
+
+model UserStatGlobal {
+  id                    Int      @id @default(autoincrement())
+  guildId               String
+  userId                String
+  messageCount          Int      @default(0)
+  voiceSeconds          Int      @default(0)
+  voiceSessionStartedAt DateTime?
+  voiceSessionChannelId String?
+  lastMessageAt         DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([guildId, userId])
 }
 
 // Insta global (sem guildId)
