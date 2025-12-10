@@ -11,6 +11,7 @@ const COLORS = {
   UNBAN: 0x57F287,
   CASTIGO: 0xFEE75C,
   CASTIGO_REMOVE: 0x5865F2,
+  CASTIGO_EXPIRE: 0xFAA61A,
 };
 
 const BAN_TITLES = {
@@ -21,6 +22,7 @@ const BAN_TITLES = {
 const CASTIGO_TITLES = {
   APPLY: 'Castigo aplicado',
   REMOVE: 'Castigo removido',
+  EXPIRE: 'Castigo expirado',
 };
 
 const DURATION_UNITS = {
@@ -113,15 +115,24 @@ function getAvatarUrl(user) {
   return null;
 }
 
-function buildLogEmbed({ type, action, targetUser, moderatorUser, reason, guild, durationSeconds }) {
+function buildLogEmbed({ type, action, targetUser, moderatorUser, reason, guild, durationSeconds, expiredAt }) {
   const embed = new EmbedBuilder();
   if (type === COMMAND_TYPES.BAN) {
     embed.setTitle(action === 'UNBAN' ? BAN_TITLES.UNBAN : BAN_TITLES.BAN);
     embed.setColor(action === 'UNBAN' ? COLORS.UNBAN : COLORS.BAN);
   } else {
     const isRemoval = action === 'REMOVE';
-    embed.setTitle(isRemoval ? CASTIGO_TITLES.REMOVE : CASTIGO_TITLES.APPLY);
-    embed.setColor(isRemoval ? COLORS.CASTIGO_REMOVE : COLORS.CASTIGO);
+    const isExpire = action === 'EXPIRE';
+    if (isRemoval) {
+      embed.setTitle(CASTIGO_TITLES.REMOVE);
+      embed.setColor(COLORS.CASTIGO_REMOVE);
+    } else if (isExpire) {
+      embed.setTitle(CASTIGO_TITLES.EXPIRE);
+      embed.setColor(COLORS.CASTIGO_EXPIRE);
+    } else {
+      embed.setTitle(CASTIGO_TITLES.APPLY);
+      embed.setColor(COLORS.CASTIGO);
+    }
   }
   const thumbnailUrl = getAvatarUrl(targetUser);
   if (thumbnailUrl) {
@@ -131,11 +142,18 @@ function buildLogEmbed({ type, action, targetUser, moderatorUser, reason, guild,
     { name: 'Membro', value: formatUserValue(targetUser), inline: true },
     { name: 'Moderador', value: formatUserValue(moderatorUser, 'Desconhecido'), inline: true },
   ];
-  if (type === COMMAND_TYPES.CASTIGO && action !== 'REMOVE' && durationSeconds) {
-    const expirationValue = buildDiscordTimestampValue(durationSeconds);
-    if (expirationValue) {
-      fields.push({ name: 'Tempo', value: formatDuration(durationSeconds), inline: false });
-      fields.push({ name: 'Expira em', value: expirationValue, inline: true });
+  if (type === COMMAND_TYPES.CASTIGO && durationSeconds && action !== 'REMOVE') {
+    fields.push({ name: 'Tempo', value: formatDuration(durationSeconds), inline: false });
+    if (action === 'APPLY') {
+      const expirationValue = buildDiscordTimestampValue(durationSeconds);
+      if (expirationValue) {
+        fields.push({ name: 'Expira em', value: expirationValue, inline: true });
+      }
+    } else if (action === 'EXPIRE') {
+      const expiredValue = buildTimestampFromDate(expiredAt);
+      if (expiredValue) {
+        fields.push({ name: 'Expirou', value: expiredValue, inline: true });
+      }
     }
   }
   fields.push({ name: 'Motivo', value: `\`\`\`${reason || 'Não informado'}\`\`\``, inline: false });
@@ -200,4 +218,13 @@ function buildDiscordTimestampValue(durationSeconds) {
   const expiresAtSeconds = Math.floor((Date.now() + durationSeconds * 1000) / 1000);
   if (!Number.isFinite(expiresAtSeconds)) return null;
   return `<t:${expiresAtSeconds}:R>`;
+}
+
+function buildTimestampFromDate(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const seconds = Math.floor(date.getTime() / 1000);
+  if (!Number.isFinite(seconds)) return null;
+  return `<t:${seconds}:R>`;
 }

@@ -9,6 +9,10 @@ const {
   parseDuration,
   formatDuration,
 } = require('../lib/moderation');
+const {
+  createCastigoRecord,
+  completeCastigoRecordForUser,
+} = require('../services/castigoRecords');
 
 const MAX_TIMEOUT_SECONDS = 28 * 24 * 60 * 60;
 
@@ -93,7 +97,7 @@ async function runUnban({ guild, moderatorMember, targetUserId, reason, prisma, 
   };
 }
 
-async function runCastigo({ guild, moderatorMember, targetMember, reason, durationInput, prisma, posseId }) {
+async function runCastigo({ guild, moderatorMember, targetMember, reason, durationInput, prisma, posseId, commandChannelId }) {
   const cfg = await ensureModerationConfig(prisma);
   if (!cfg.castigoEnabled) {
     throw new Error('O comando de castigo está desativado no momento.');
@@ -116,6 +120,7 @@ async function runCastigo({ guild, moderatorMember, targetMember, reason, durati
     throw new Error('Tempo máximo permitido é 28 dias.');
   }
   const cleanReason = ensureReason(reason);
+  const expiresAt = new Date(Date.now() + seconds * 1000);
   const logEmbed = buildLogEmbed({
     type: COMMAND_TYPES.CASTIGO,
     action: 'APPLY',
@@ -129,6 +134,16 @@ async function runCastigo({ guild, moderatorMember, targetMember, reason, durati
   await targetMember.timeout(seconds * 1000, cleanReason).catch((err) => {
     throw new Error(`Falha ao aplicar castigo: ${err?.message || err}`);
   });
+  await createCastigoRecord({
+    prisma,
+    guildId: guild.id,
+    userId: targetMember.id,
+    moderatorId: moderatorMember.id,
+    reason: cleanReason,
+    durationSeconds: seconds,
+    expiresAt,
+    commandChannelId,
+  }).catch((err) => console.warn('[castigo record] falha ao salvar', err?.message || err));
   const logSent = await sendLogMessage(guild, cfg.castigoLogChannelId, logEmbed);
   return {
     message: `${targetMember.user.tag || targetMember.user.username} castigado por ${formatDuration(seconds)}.`,
@@ -157,6 +172,13 @@ async function runRemoveCastigo({ guild, moderatorMember, targetMember, reason, 
   await targetMember.timeout(null, cleanReason).catch((err) => {
     throw new Error(`Falha ao remover castigo: ${err?.message || err}`);
   });
+  await completeCastigoRecordForUser({
+    prisma,
+    guildId: guild.id,
+    userId: targetMember.id,
+    endedReason: cleanReason,
+    endedBy: moderatorMember.id,
+  }).catch((err) => console.warn('[castigo record] falha ao encerrar', err?.message || err));
   const logEmbed = buildLogEmbed({
     type: COMMAND_TYPES.CASTIGO,
     action: 'REMOVE',

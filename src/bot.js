@@ -5,6 +5,7 @@ const path = require('node:path');
 const { getPrisma } = require('./db');
 const { ensureGuild } = require('./permissions');
 const { registerMuteFeature } = require('./features/mute');
+const { registerCastigoExpiration } = require('./features/castigoExpiration');
 const { handleSupportInteraction } = require('./features/support');
 const { createMenuHandler } = require('./features/menu');
 const instaFeature = require('./features/insta');
@@ -47,6 +48,12 @@ try {
   registerMuteFeature(client);
 } catch (e) {
   console.warn('[init] Mute feature não carregada:', e?.message || e);
+}
+
+try {
+  registerCastigoExpiration(client);
+} catch (e) {
+  console.warn('[init] Castigo expiration não carregado:', e?.message || e);
 }
 
 try {

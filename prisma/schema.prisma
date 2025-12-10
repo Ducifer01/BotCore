@@ -37,6 +37,7 @@ model GlobalConfig {
   autoModConfig        AutoModConfig?
   // Moderação
   moderationConfig     ModerationConfig?
+  castigoRecords       CastigoRecord[]
   // Convites
   inviteTrackingEnabled   Boolean       @default(false)
   inviteRankingEnabled    Boolean       @default(false)
@@ -127,6 +128,27 @@ model ModerationPermission {
   config              ModerationConfig  @relation(fields: [moderationConfigId], references: [id], onDelete: Cascade)
 
   @@unique([moderationConfigId, commandType, roleId])
+}
+
+model CastigoRecord {
+  id               Int       @id @default(autoincrement())
+  globalConfigId   Int
+  guildId          String
+  userId           String
+  moderatorId      String?
+  reason           String?
+  durationSeconds  Int
+  expiresAt        DateTime
+  commandChannelId String?
+  endedAt          DateTime?
+  endedReason      String?
+  endedBy          String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  config           GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
+
+  @@index([guildId, userId])
+  @@index([expiresAt])
 }
 
 model InviteStat {

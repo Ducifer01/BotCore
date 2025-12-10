@@ -267,6 +267,7 @@ async function handlePrefixCastigo(message, args, prisma, posseId) {
     durationInput: durationToken,
     prisma,
     posseId,
+    commandChannelId: message.channel?.id,
   });
   await sendSuccessFeedback(message.channel, result.message, result.logEmbed);
 }

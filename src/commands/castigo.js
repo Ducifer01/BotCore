@@ -28,6 +28,7 @@ module.exports = {
         durationInput: tempo,
         prisma,
         posseId,
+        commandChannelId: interaction.channelId,
       });
       await interaction.reply({ content: result.message, ephemeral: true });
     } catch (err) {
