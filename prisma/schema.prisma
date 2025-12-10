@@ -44,6 +44,9 @@ model GlobalConfig {
   inviteRankingGuildId    String?
   inviteRankingMessageId  String?
   inviteRankingLastRefresh DateTime?
+  inviteLogChannelId      String?
+  inviteAccountAgeFilterEnabled Boolean @default(false)
+  inviteAccountAgeMinDays  Int         @default(7)
   inviteStats              InviteStat[]
   inviteEvents             InviteEvent[]
   // Mute config avançada

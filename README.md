@@ -97,11 +97,13 @@ Uso:
 
 ### Ranking de Convites
 - Abra `/menu` e selecione **Configurar Convites** para ativar/desativar o rastreamento. O botão de toggle muda entre verde (ativo) e vermelho (desativado) e o painel sempre opera em uma única mensagem ephemeral.
-- Defina o **Canal do Ranking** via Channel Select. Assim que ativo, o bot cria (ou reaproveita) uma mensagem única nesse canal com embed paginado (50 usuários por página) e botões Prev/Next/Atualizar. Tudo segue o padrão de máquina de estados: nenhuma mensagem extra é criada.
+- Defina o **Canal do Ranking** via Channel Select. Assim que ativo, o bot cria (ou reaproveita) uma mensagem única nesse canal com embed paginado (50 usuários por página) e botões Prev/Next. Tudo segue o padrão de máquina de estados: nenhuma mensagem extra é criada.
+- Defina também o **Canal de Logs**: cada entrada válida gera um embed verde automático no canal escolhido com `{usuário} entrou usando o convite {código}, criado por {inviter}`. Os nomes são exibidos em texto (sem mencionar) e o log persiste mesmo após reiniciar o bot.
 - Ao ligar, o bot faz cache de todos os convites existentes; sempre que alguém entra, ele baixa novamente, compara usos e identifica o invite utilizado + o dono. Cada entrada é salva no banco (`InviteStat` e `InviteEvent`), incluindo código do convite e última pessoa convidada.
 - O ranking exibe apenas o **username/texto**, sem mencionar usuários, e mostra o total de convites de cada anfitrião. Quando a lista passar de 50 nomes, os botões de paginação ficam habilitados.
-- Um timestamp no embed informa `Ranking atualizará em: <tempo relativo>` usando o recurso nativo do Discord (`<t:...:R>`). O bot atualiza automaticamente a cada 5 minutos e também sempre que um novo convidado é detectado ou quando o botão **Atualizar agora** é clicado.
+- Um timestamp no embed informa `Ranking atualizará em: <tempo relativo>` usando o recurso nativo do Discord (`<t:...:R>`). O bot atualiza automaticamente a cada 5 minutos e também sempre que um novo convidado é detectado.
 - Dentro do painel de convites existe o botão **Resetar Rank**, que pede confirmação explícita com "tem certeza?" antes de apagar o histórico no banco. O ranking no canal é limpo imediatamente após o reset.
+- O painel oferece um **Filtro por idade da conta**: ative/desative pelo próprio painel e defina os dias mínimos (ex.: 7). Se o filtro estiver ativo, contas abaixo do limite não entram no ranking nem no banco; o log mostra "Atenção" explicando que não foi contabilizado.
 
 ### Moderação (Ban/Castigo)
 - No `/menu`, selecione **Configurar Moderação** para abrir o painel principal e siga para **Config Ban** ou **Config Castigo**.

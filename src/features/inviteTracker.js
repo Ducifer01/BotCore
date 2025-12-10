@@ -5,12 +5,16 @@ const {
   ButtonStyle,
   ChannelSelectMenuBuilder,
   ChannelType,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
 } = require('discord.js');
 const { getGlobalConfig, ensureGlobalConfig } = require('../services/globalConfig');
 const { getPrisma } = require('../db');
 
 const PAGE_SIZE = 50;
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const inviteCache = new Map(); // guildId -> Map<code, uses>
 const rankingViewState = new Map(); // messageId -> { page, totalPages }
@@ -28,6 +32,9 @@ const runtime = {
   guildId: null,
   messageId: null,
   lastRefresh: null,
+  logChannelId: null,
+  filterEnabled: false,
+  filterMinDays: 7,
 };
 
 let nextRefreshAt = null;
@@ -85,6 +92,9 @@ async function presentMenu(interaction, ctx) {
 }
 
 async function handleInteraction(interaction, ctx) {
+  if (interaction.isModalSubmit() && interaction.customId === 'menu:invite:filter:days:modal') {
+    return handleFilterModal(interaction, ctx);
+  }
   const id = interaction.customId;
   if (!id) return false;
 
@@ -105,16 +115,19 @@ async function handleInteraction(interaction, ctx) {
 }
 
 async function handleMenuButtons(interaction, ctx) {
-  await interaction.deferUpdate().catch(() => {});
   if (!(await ensurePosse(interaction, ctx))) {
     return true;
   }
-  const prisma = ctx.getPrisma();
-  const cfg = (await getGlobalConfig(prisma)) || (await ensureGlobalConfig(prisma));
   const parts = interaction.customId.split(':');
   const section = parts[1];
   const action = parts[2] || 'home';
   const subAction = parts[3];
+  const opensModal = section === 'invite' && action === 'filter' && subAction === 'days';
+  if (!opensModal) {
+    await interaction.deferUpdate().catch(() => {});
+  }
+  const prisma = ctx.getPrisma();
+  const cfg = (await getGlobalConfig(prisma)) || (await ensureGlobalConfig(prisma));
 
   if (section !== 'invite') {
     return false;
@@ -171,6 +184,41 @@ async function handleMenuButtons(interaction, ctx) {
     return showResetPrompt(interaction);
   }
 
+  if (action === 'log' && !subAction) {
+    return renderLogChannelPrompt(interaction, cfg);
+  }
+
+  if (action === 'log' && subAction === 'clear') {
+    await prisma.globalConfig.update({
+      where: { id: cfg.id },
+      data: { inviteLogChannelId: null },
+    });
+    const updatedCfg = { ...cfg, inviteLogChannelId: null };
+    await refreshRuntimeState(prisma, updatedCfg);
+    return renderHome(interaction, updatedCfg, { type: 'info', message: 'Canal de log removido.' });
+  }
+
+  if (action === 'filter' && !subAction) {
+    return renderFilterPanel(interaction, cfg);
+  }
+
+  if (action === 'filter' && subAction === 'toggle') {
+    const nextStatus = !cfg.inviteAccountAgeFilterEnabled;
+    const updated = await prisma.globalConfig.update({
+      where: { id: cfg.id },
+      data: { inviteAccountAgeFilterEnabled: nextStatus },
+    });
+    await refreshRuntimeState(prisma, updated);
+    return renderFilterPanel(interaction, updated, {
+      type: 'success',
+      message: `Filtro ${nextStatus ? 'ativado' : 'desativado'}.`,
+    });
+  }
+
+  if (action === 'filter' && subAction === 'days') {
+    return showFilterDaysModal(interaction, cfg);
+  }
+
   if (action === 'resetconfirm') {
     await performReset(interaction, prisma, cfg);
     return true;
@@ -198,17 +246,30 @@ async function handleChannelSelect(interaction, ctx) {
   if (!channelId) {
     return renderHome(interaction, cfg, { type: 'error', message: 'Seleção inválida.' });
   }
-  await deleteRankingMessage();
-  await prisma.globalConfig.update({
-    where: { id: cfg.id },
-    data: { inviteRankingChannelId: channelId, inviteRankingGuildId: interaction.guildId, inviteRankingMessageId: null },
-  });
-  await refreshRuntimeState(prisma);
-  await ensureRankingPanel(prisma);
-  return renderHome(interaction, { ...cfg, inviteRankingChannelId: channelId, inviteRankingGuildId: interaction.guildId }, {
-    type: 'success',
-    message: `Ranking será publicado em <#${channelId}>.`,
-  });
+  if (interaction.customId === 'menu:invite:channel:set') {
+    await deleteRankingMessage();
+    await prisma.globalConfig.update({
+      where: { id: cfg.id },
+      data: { inviteRankingChannelId: channelId, inviteRankingGuildId: interaction.guildId, inviteRankingMessageId: null },
+    });
+    await refreshRuntimeState(prisma);
+    await ensureRankingPanel(prisma);
+    return renderHome(interaction, { ...cfg, inviteRankingChannelId: channelId, inviteRankingGuildId: interaction.guildId }, {
+      type: 'success',
+      message: `Ranking será publicado em <#${channelId}>.`,
+    });
+  }
+
+  if (interaction.customId === 'menu:invite:log:set') {
+    const updated = await prisma.globalConfig.update({
+      where: { id: cfg.id },
+      data: { inviteLogChannelId: channelId },
+    });
+    await refreshRuntimeState(prisma, updated);
+    return renderHome(interaction, updated, { type: 'success', message: `Logs serão enviados em <#${channelId}>.` });
+  }
+
+  return false;
 }
 
 async function handleRankingButtons(interaction) {
@@ -226,6 +287,32 @@ async function handleRankingButtons(interaction) {
   rankingViewState.set(messageId, state);
   await updateRankingMessage({ page: state.page, interaction });
   return true;
+}
+
+async function handleFilterModal(interaction, ctx) {
+  await interaction.deferUpdate().catch(() => {});
+  if (!(await ensurePosse(interaction, ctx))) {
+    return true;
+  }
+  const prisma = ctx.getPrisma();
+  const cfg = (await getGlobalConfig(prisma)) || (await ensureGlobalConfig(prisma));
+  const raw = interaction.fields.getTextInputValue('menu:invite:filter:days:value');
+  let minDays = parseInt(raw, 10);
+  if (!Number.isFinite(minDays) || minDays < 1) {
+    minDays = 1;
+  }
+  if (minDays > 365) {
+    minDays = 365;
+  }
+  const updated = await prisma.globalConfig.update({
+    where: { id: cfg.id },
+    data: { inviteAccountAgeMinDays: minDays },
+  });
+  await refreshRuntimeState(prisma, updated);
+  return renderFilterPanel(interaction, updated, {
+    type: 'success',
+    message: `Filtro ajustado para contas com pelo menos ${minDays} dias.`,
+  });
 }
 
 async function ensurePosse(interaction, ctx) {
@@ -258,7 +345,12 @@ function buildInviteEmbed(cfg, totalStats, status) {
   const lines = [];
   lines.push(`Status: **${rankingEnabled ? 'Ativo' : 'Inativo'}**`);
   lines.push(`Canal: ${cfg.inviteRankingChannelId ? `<#${cfg.inviteRankingChannelId}>` : 'não definido'}`);
+  lines.push(`Log: ${cfg.inviteLogChannelId ? `<#${cfg.inviteLogChannelId}>` : 'não definido'}`);
   lines.push(`Entradas registradas: **${totalStats}**`);
+  const filterStatus = cfg.inviteAccountAgeFilterEnabled
+    ? `Ativo (≥ ${cfg.inviteAccountAgeMinDays || 0} dias)`
+    : 'Inativo';
+  lines.push(`Filtro conta: ${filterStatus}`);
   const nextText = rankingEnabled && nextRefreshAt
     ? formatRelative(nextRefreshAt)
     : 'quando o sistema estiver ativo';
@@ -280,6 +372,10 @@ function buildHomeComponents(cfg) {
       new ButtonBuilder().setCustomId('menu:invite:toggle').setLabel(toggleLabel).setStyle(toggleStyle),
       new ButtonBuilder().setCustomId('menu:invite:channel').setLabel('Definir Canal').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('menu:invite:reset').setLabel('Resetar Rank').setStyle(ButtonStyle.Danger),
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('menu:invite:log').setLabel('Canal de Log').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('menu:invite:filter').setLabel('Filtro de Contas').setStyle(ButtonStyle.Secondary),
     ),
   ];
 }
@@ -311,6 +407,33 @@ async function renderChannelPrompt(interaction, cfg) {
   return true;
 }
 
+async function renderLogChannelPrompt(interaction, cfg) {
+  const select = new ChannelSelectMenuBuilder()
+    .setCustomId('menu:invite:log:set')
+    .setPlaceholder('Escolha o canal de logs')
+    .setMinValues(1)
+    .setMaxValues(1)
+    .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement);
+  if (cfg.inviteLogChannelId) {
+    select.setDefaultChannels(cfg.inviteLogChannelId);
+  }
+  const embed = new EmbedBuilder()
+    .setTitle('Canal de Logs de Convites')
+    .setDescription('Selecione o canal onde enviarei os logs de novas entradas por convite.')
+    .setColor(0x57F287);
+  const row = new ActionRowBuilder().addComponents(select);
+  const nav = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('menu:invite:home').setLabel('Voltar').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId('menu:invite:log:clear')
+      .setLabel('Remover Canal')
+      .setStyle(ButtonStyle.Danger)
+      .setDisabled(!cfg.inviteLogChannelId),
+  );
+  await interaction.editReply({ embeds: [embed], components: [row, nav] }).catch(() => {});
+  return true;
+}
+
 async function showResetPrompt(interaction) {
   const embed = new EmbedBuilder()
     .setTitle('Resetar Ranking')
@@ -321,6 +444,48 @@ async function showResetPrompt(interaction) {
     new ButtonBuilder().setCustomId('menu:invite:resetcancel').setLabel('Cancelar').setStyle(ButtonStyle.Secondary),
   );
   await interaction.editReply({ embeds: [embed], components: [row] }).catch(() => {});
+  return true;
+}
+
+function buildFilterEmbed(cfg, status) {
+  const lines = [];
+  const enabled = cfg.inviteAccountAgeFilterEnabled;
+  lines.push(`Status: **${enabled ? 'Ativo' : 'Inativo'}**`);
+  lines.push(`Dias mínimos: **${cfg.inviteAccountAgeMinDays || 0}**`);
+  const desc = status ? `${statusIcon(status.type)} ${status.message}\n\n` : '';
+  return new EmbedBuilder()
+    .setTitle('Filtro por idade da conta')
+    .setDescription(`${desc}Quando ativo, somente contas com pelo menos X dias serão contabilizadas.`)
+    .addFields({ name: 'Configuração atual', value: lines.join('\n') })
+    .setColor(enabled ? 0x57F287 : 0x5865F2);
+}
+
+async function renderFilterPanel(interaction, cfg, status) {
+  const embed = buildFilterEmbed(cfg, status);
+  const toggleLabel = cfg.inviteAccountAgeFilterEnabled ? 'Desativar filtro' : 'Ativar filtro';
+  const toggleStyle = cfg.inviteAccountAgeFilterEnabled ? ButtonStyle.Danger : ButtonStyle.Success;
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('menu:invite:filter:toggle').setLabel(toggleLabel).setStyle(toggleStyle),
+    new ButtonBuilder().setCustomId('menu:invite:filter:days').setLabel('Definir dias').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('menu:invite:home').setLabel('Voltar').setStyle(ButtonStyle.Secondary),
+  );
+  await interaction.editReply({ embeds: [embed], components: [row] }).catch(() => {});
+  return true;
+}
+
+async function showFilterDaysModal(interaction, cfg) {
+  const modal = new ModalBuilder()
+    .setCustomId('menu:invite:filter:days:modal')
+    .setTitle('Definir mínimo de dias');
+  const input = new TextInputBuilder()
+    .setCustomId('menu:invite:filter:days:value')
+    .setLabel('Dias mínimos da conta')
+    .setPlaceholder('Ex: 7')
+    .setRequired(true)
+    .setValue(String(cfg.inviteAccountAgeMinDays || 7))
+    .setStyle(TextInputStyle.Short);
+  modal.addComponents(new ActionRowBuilder().addComponents(input));
+  await interaction.showModal(modal).catch(() => {});
   return true;
 }
 
@@ -355,6 +520,9 @@ async function refreshRuntimeState(prisma = getPrisma(), forcedConfig) {
   runtime.guildId = cfg.inviteRankingGuildId || null;
   runtime.messageId = cfg.inviteRankingMessageId || null;
   runtime.lastRefresh = cfg.inviteRankingLastRefresh ? new Date(cfg.inviteRankingLastRefresh) : null;
+  runtime.logChannelId = cfg.inviteLogChannelId || null;
+  runtime.filterEnabled = Boolean(cfg.inviteAccountAgeFilterEnabled);
+  runtime.filterMinDays = cfg.inviteAccountAgeMinDays || 7;
   return cfg;
 }
 
@@ -406,19 +574,31 @@ async function handleMemberJoin(member) {
   const inviterTag = usedInvite?.inviter?.tag || usedInvite?.inviter?.username || null;
   const inviteCode = usedInvite?.code || null;
 
-  await prisma.inviteEvent.create({
-    data: {
-      globalConfigId,
-      guildId: guild.id,
-      userId: member.id,
-      inviterId,
-      inviterTag,
-      inviteCode,
-    },
-  }).catch(() => {});
+  if (!inviterId || !inviteCode) {
+    return;
+  }
 
-  if (inviterId) {
-    await prisma.inviteStat.upsert({
+  const filterEnabled = runtime.filterEnabled;
+  const minDays = runtime.filterMinDays || 0;
+  const createdAt = member.user?.createdAt ? member.user.createdAt.getTime() : null;
+  const accountAgeMs = createdAt ? Date.now() - createdAt : Number.MAX_SAFE_INTEGER;
+  const meetsFilter = !filterEnabled || accountAgeMs >= minDays * DAY_MS;
+
+  let totalUses = null;
+
+  if (meetsFilter) {
+    await prisma.inviteEvent.create({
+      data: {
+        globalConfigId,
+        guildId: guild.id,
+        userId: member.id,
+        inviterId,
+        inviterTag,
+        inviteCode,
+      },
+    }).catch(() => {});
+
+    const stat = await prisma.inviteStat.upsert({
       where: {
         globalConfigId_guildId_inviterId: {
           globalConfigId,
@@ -444,9 +624,20 @@ async function handleMemberJoin(member) {
         lastJoinAt: new Date(),
       },
     });
+    totalUses = stat?.uses ?? null;
   }
 
-  if (runtime.enabled) {
+  await sendInviteLog({
+    member,
+    inviteCode,
+    inviterId,
+    inviterTag,
+    counted: meetsFilter,
+    minDays,
+    totalUses,
+  });
+
+  if (meetsFilter && runtime.enabled) {
     await enqueueRankingRefresh('member-join');
   }
 }
@@ -541,6 +732,37 @@ async function updateRankingMessage({ page, interaction }) {
   if (interaction.message?.id) {
     rankingViewState.set(interaction.message.id, { page, totalPages: totalPages || 1 });
   }
+}
+
+async function sendInviteLog({ member, inviteCode, inviterId, inviterTag, counted, minDays, totalUses }) {
+  if (!clientRef) return;
+  const channelId = runtime.logChannelId;
+  if (!channelId) return;
+  const channel = await clientRef.channels.fetch(channelId).catch(() => null);
+  if (!channel) {
+    runtime.logChannelId = null;
+    const prisma = getPrisma();
+    await prisma.globalConfig.update({
+      where: { id: runtime.globalConfigId },
+      data: { inviteLogChannelId: null },
+    }).catch(() => {});
+    return;
+  }
+  const userMention = member?.id ? `<@${member.id}>` : member?.user?.username || 'Usuário';
+  const inviterMention = inviterId ? `<@${inviterId}>` : inviterTag || 'Desconhecido';
+  const inviteLabel = inviteCode ? `\`${inviteCode}\`` : 'desconhecido';
+  let description = `${userMention} entrou no servidor usando o convite ${inviteLabel}, criado por ${inviterMention}.`;
+  if (!counted) {
+    const effectiveMinDays = Math.max(1, minDays || 1);
+    description += ` Atenção: a conta possui menos de ${effectiveMinDays} dias. **NÃO CONTABILIZADO.**`;
+  } else if (typeof totalUses === 'number') {
+    description += ` Agora ${inviterMention} possui **${totalUses}** convites.`;
+  }
+  const embed = new EmbedBuilder()
+    .setColor(0x57F287)
+    .setDescription(description)
+    .setTimestamp(new Date());
+  await channel.send({ embeds: [embed] }).catch(() => {});
 }
 
 async function buildRankingPayload({ page = 1, guildId }) {
