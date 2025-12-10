@@ -371,7 +371,11 @@ async function handleInfoCommand(message, args, prisma) {
       iconURL: message.author.displayAvatarURL({ size: 64 }),
     })
     .setColor(verifyRecord ? 0x2ECC71 : 0xE74C3C);
-  await message.channel.send({ embeds: [embed] });
+  const sent = await message.channel.send({ embeds: [embed] });
+
+  setTimeout(() => {
+    sent.delete().catch(() => {});
+  }, 10000);
 }
 
 async function handleRemoveVerifiedCommand(message, args, prisma, posseId) {
