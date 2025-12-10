@@ -20,6 +20,7 @@ const moderationConfig = require('./features/moderationConfig');
 const moderationCommands = require('./features/moderationCommands');
 const muteCommands = require('./features/muteCommands');
 const inviteTrackerFeature = require('./features/inviteTracker');
+const channelCleanerFeature = require('./features/channelCleaner');
 const { ALLOWED_GUILD_IDS, isGuildAllowed } = require('./config');
 
 const client = new Client({ intents: [
@@ -52,6 +53,12 @@ try {
   console.warn('[init] Invite tracker não carregado:', e?.message || e);
 }
 
+try {
+  channelCleanerFeature.registerChannelCleaner(client);
+} catch (e) {
+  console.warn('[init] Channel cleaner não carregado:', e?.message || e);
+}
+
 const menuHandler = createMenuHandler({
   insta: { presentMenu: instaFeature.presentMenu },
   mute: { presentMenu: muteConfig.presentMenu },
@@ -59,6 +66,7 @@ const menuHandler = createMenuHandler({
   automod: { presentMenu: autoModFeature.presentMenu },
   moderation: { presentMenu: moderationConfig.presentMenu },
   invites: { presentMenu: inviteTrackerFeature.presentMenu },
+  cleaner: { presentMenu: channelCleanerFeature.presentMenu },
 });
 
 const interactionFeatures = [
@@ -74,6 +82,7 @@ const interactionFeatures = [
   autoModFeature,
   moderationConfig,
   inviteTrackerFeature,
+  channelCleanerFeature,
   { handleInteraction: handleSupportInteraction },
 ];
 

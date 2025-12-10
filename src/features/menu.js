@@ -16,12 +16,13 @@ function buildRootSelect() {
       { label: 'Configurar Mute', value: 'mute', description: 'Cargo mutado, canal de desbloqueio e bot responsável' },
       { label: 'Configurar Suporte', value: 'support', description: 'Painel, cargos e logs do suporte' },
       { label: 'Configurar AutoMod', value: 'automod', description: 'Palavras bloqueadas e punições' },
-  { label: 'Configurar Moderação', value: 'moderation', description: 'Banimentos, castigos e permissões' },
+      { label: 'Configurar Moderação', value: 'moderation', description: 'Banimentos, castigos e permissões' },
       { label: 'Configurar Convites', value: 'invites', description: 'Ranking e monitoramento de convites' },
+      { label: 'Configurar Limpeza', value: 'cleaner', description: 'Painéis para limpar mensagens automaticamente' },
     ]);
 }
 
-function createMenuHandler({ insta, mute, support, automod, moderation, invites }) {
+function createMenuHandler({ insta, mute, support, automod, moderation, invites, cleaner }) {
   async function handleInteraction(interaction, ctx) {
     if (interaction.isStringSelectMenu() && interaction.customId === 'menu:root') {
       return handleRootSelection(interaction, ctx);
@@ -56,6 +57,9 @@ function createMenuHandler({ insta, mute, support, automod, moderation, invites 
     }
     if (choice === 'invites') {
       return invites.presentMenu(interaction, ctx);
+    }
+    if (choice === 'cleaner') {
+      return cleaner.presentMenu(interaction, ctx);
     }
     return false;
   }

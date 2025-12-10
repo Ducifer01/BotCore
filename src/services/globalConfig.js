@@ -16,6 +16,7 @@ async function getGlobalConfig(prisma = getPrisma()) {
           permissions: true,
         },
       },
+      channelCleanerPanels: true,
     },
   });
   return cfg || null;

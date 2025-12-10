@@ -118,6 +118,14 @@ Uso:
 - Hierarquia sempre é respeitada: nem o executor nem o bot podem agir em alguém com cargo igual/maior.
 - Os logs seguem o layout solicitado: título específico (Banimento/Banimento removido/Castigo aplicado/Castigo removido), campos "Membro" e "Moderador" no formato `<@user> (tag)\nID: \\`123\\`` e campo "Motivo" representado dentro de um bloco de código.
 
+### Limpeza automática de canais
+- No `/menu`, escolha **Configurar Limpeza** para abrir o painel (apenas uma mensagem) com todos os painéis cadastrados e seus status.
+- Clique em **Criar painel** para seguir o fluxo guiado: informe o nome, selecione o canal via Channel Select e digite o intervalo usando `s/m/h` (ex.: `30s`, `5m`, `2h`). O valor mínimo é 10s e o máximo é 6h.
+- Opcionalmente informe um ID de mensagem para servir como limite (a limpeza para quando atingir essa mensagem) ou digite **pular** para continuar sem filtro.
+- Cada painel tem botões para editar nome/intervalo/filtro, trocar o canal monitorado, ativar/desativar, executar manualmente ou excluir (com confirmação). Também há um botão específico para limpar somente o filtro atual.
+- A tarefa automática apaga até 1.000 mensagens por ciclo, utilizando `bulkDelete` quando as mensagens têm até 14 dias e exclusões individuais com pequenos delays para o restante.
+- O embed mostra a última execução com `<t:...:R>` e o botão **Atualizar** recarrega os dados sem criar novas mensagens. Os logs das execuções aparecem no console (`[cleaner] Painel ...`).
+
 ### Mutes (voz e chat)
 - Dentro do `/menu`, escolha **Configurar Mute** para abrir o painel com duas abas:
 	- **Mute Voz (!mutecall / !unmutecall)**: define o **Cargo mutado voz**, o **Canal de desbloqueio** (opcional), o **Canal de log** e permissões individuais para os comandos. Os selects já vêm pré-preenchidos com os valores salvos e usam Role/Channel Select com autocomplete.

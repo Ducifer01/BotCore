@@ -49,6 +49,8 @@ model GlobalConfig {
   inviteAccountAgeMinDays  Int         @default(7)
   inviteStats              InviteStat[]
   inviteEvents             InviteEvent[]
+  // Limpeza de canais
+  channelCleanerPanels     ChannelCleanerPanel[]
   // Mute config avançada
   mutePermissions      MutePermission[]
   voiceMutes           VoiceMute[]
@@ -156,6 +158,24 @@ model InviteEvent {
   config         GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
 
   @@index([guildId, inviterId])
+}
+
+model ChannelCleanerPanel {
+  id              Int      @id @default(autoincrement())
+  globalConfigId  Int
+  name            String
+  guildId         String
+  channelId       String
+  intervalSeconds Int
+  filterMessageId String?
+  isActive        Boolean  @default(true)
+  lastRunAt       DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  config          GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
+
+  @@index([channelId])
+  @@index([globalConfigId, isActive])
 }
 
 model MutePermission {
