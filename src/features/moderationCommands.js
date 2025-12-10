@@ -429,9 +429,9 @@ async function handleVerificadoCommand(message, args, prisma, posseId) {
     .setTitle(member.user.username)
     .setDescription(`Informações sobre o usuário ${member.user.username}`)
     .addFields(
-      { name: 'Membro', value: `<@${member.id}> | ${member.id}`, inline: true },
-      { name: 'Status', value: record ? 'Verificado' : 'Não verificado', inline: true },
-      { name: 'Verificado por', value: record?.verifiedBy ? `<@${record.verifiedBy}> | ${record.verifiedBy}` : '—', inline: true },
+      { name: 'Membro', value: `<@${member.id}> | ${member.id}`, inline: false },
+      { name: 'Status', value: record ? 'Verificado' : 'Não verificado', inline: false },
+      { name: 'Verificado por', value: record?.verifiedBy ? `<@${record.verifiedBy}> | ${record.verifiedBy}` : '—', inline: false },
     )
     .setThumbnail(member.displayAvatarURL({ size: 256 }))
     .setColor(record ? 0x2ECC71 : 0xE74C3C);
