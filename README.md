@@ -36,6 +36,37 @@ npm run prisma:migrate
 npm run dev
 ```
 
+## Execução com Docker
+1. Garanta que o arquivo `.env` existe (copiado de `.env.example`). Os valores serão injetados automaticamente pelo Compose.
+2. Gere/migre o banco dentro do container (usa o volume `./data` para persistir o SQLite):
+
+```powershell
+docker compose run --rm bot npx prisma migrate deploy
+```
+
+3. Construa e suba o bot:
+
+```powershell
+docker compose up --build -d
+```
+
+4. Para acompanhar os logs:
+
+```powershell
+docker compose logs -f bot
+```
+
+5. Para parar tudo:
+
+```powershell
+docker compose down
+```
+
+Notas rápidas:
+- O arquivo SQLite é salvo em `./data/dev.db` no host para persistir entre reinícios.
+- Você pode ajustar `DATABASE_URL` no `.env` se quiser outro caminho.
+- As migrações podem ser reaplicadas a qualquer momento com o mesmo comando do passo 2.
+
 ## Permissões dinâmicas
 - Cada comando possui configuração em `CommandConfig`.
 - Se não houver allow-list configurada, o acesso padrão é para quem possui Administrator ou ManageChannels na guild.
