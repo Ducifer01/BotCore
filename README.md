@@ -68,9 +68,10 @@ Notas rápidas:
 - As migrações podem ser reaplicadas a qualquer momento com o mesmo comando do passo 2.
 
 ## Permissões dinâmicas
-- Cada comando possui configuração em `CommandConfig`.
-- Se não houver allow-list configurada, o acesso padrão é para quem possui Administrator ou ManageChannels na guild.
-- Para permitir usuários/cargos específicos, insira registros em `AllowedUser` e `AllowedRole` (via Prisma Studio ou futuros comandos de administração).
+- No `/menu`, escolha **Configurar Permissões** para definir quais cargos podem usar cada comando (exceto os que já possuem painel dedicado, como `/ban` e `/castigo`).
+- Apenas cargos listados (e o usuário posse configurado via `POSSE_USER_ID`) conseguem executar o comando correspondente; permissões administrativas do Discord não concedem acesso automático.
+- Enquanto nenhum cargo estiver associado a um comando, somente o usuário posse poderá executá-lo. Configure ao menos um cargo para liberar o uso.
+- As escolhas são armazenadas em `CommandPermissionGlobal` (ligado ao `GlobalConfig`). O painel mostra o resumo atual e permite adicionar/remover cargos a partir de selects nativos.
 
 ## Comandos
 - `/copiar_perm_categoria origem:<categoria> destino:<categoria>` — copia overwrites de uma categoria para outra.

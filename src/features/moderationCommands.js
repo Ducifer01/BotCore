@@ -3,6 +3,7 @@ const { runBan, runUnban, runCastigo, runRemoveCastigo, resolveTargetUser } = re
 const { COMMAND_TYPES, ensureModerationConfig, memberHasPermission } = require('../lib/moderation');
 const { getGlobalConfig } = require('../services/globalConfig');
 const { getUserStats } = require('../services/userStats');
+const { getAllowedRolesForCommand } = require('../services/commandPermissions');
 
 const PREFIX = '!';
 const TEMP_MESSAGE_TTL = 15000;
@@ -108,11 +109,29 @@ function isDurationToken(token) {
   return /^\d+(s|m|h|d|w)$/i.test(String(token).trim());
 }
 
-function hasVerifyPermission(member, cfg, posseId) {
-  if (!member) return false;
-  if (posseId && member.id === posseId) return true;
-  if (!cfg?.mainRoleId) return false;
-  return member.roles.cache.has(cfg.mainRoleId);
+async function assertCommandPermissionFromMenu(commandNames, member, prisma, posseId) {
+  if (!member) {
+    throw new PermissionError('Este comando só pode ser usado dentro de um servidor.');
+  }
+  if (posseId && member.id === posseId) {
+    return true;
+  }
+  const identifiers = (Array.isArray(commandNames) ? commandNames : [commandNames])
+    .map((name) => String(name || '').trim().toLowerCase())
+    .filter(Boolean);
+  if (!identifiers.length) {
+    throw new PermissionError('Comando não configurado para verificação de permissões.');
+  }
+  const roleLists = await Promise.all(identifiers.map((name) => getAllowedRolesForCommand(name, prisma)));
+  const allowedRoles = [...new Set(roleLists.flat())];
+  if (!allowedRoles.length) {
+    throw new PermissionError('Nenhum cargo foi configurado para este comando. Defina-os em /menu → Permissões.');
+  }
+  const hasRole = member.roles.cache.some((role) => allowedRoles.includes(role.id));
+  if (!hasRole) {
+    throw new PermissionError('Você não possui um cargo autorizado para este comando.');
+  }
+  return true;
 }
 
 async function sendTemporaryMessage(channel, payload, ttl = TEMP_MESSAGE_TTL) {
@@ -368,9 +387,7 @@ async function handleRemoveVerifiedCommand(message, args, prisma, posseId) {
   if (!cfg?.mainRoleId) {
     throw new Error('Sistema de verificação não está configurado.');
   }
-  if (!hasVerifyPermission(message.member, cfg, posseId)) {
-    throw new PermissionError('Você não tem permissão para remover verificações.');
-  }
+  await assertCommandPermissionFromMenu(['remover_verificado', 'remover_verificação'], message.member, prisma, posseId);
   const record = await prisma.verifiedUserGlobal.findUnique({ where: { userId: targetId } }).catch(() => null);
   if (!record) {
     await sendTemporaryMessage(message.channel, 'Este usuário não está verificado.');
@@ -402,10 +419,7 @@ async function handleVerificadoCommand(message, args, prisma, posseId) {
   if (!targetId) {
     throw new CommandUsageError('Informe um usuário válido. ex: !verificado @usuario', 'verificado');
   }
-  const cfg = await getGlobalConfig(prisma);
-  if (!hasVerifyPermission(message.member, cfg, posseId)) {
-    throw new PermissionError('Apenas cargos autorizados podem usar este comando.');
-  }
+  await assertCommandPermissionFromMenu(['verificado', 'verificação'], message.member, prisma, posseId);
   const member = await message.guild.members.fetch(targetId).catch(() => null);
   if (!member) {
     throw new Error('Usuário não encontrado no servidor.');

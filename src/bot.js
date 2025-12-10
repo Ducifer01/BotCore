@@ -17,6 +17,7 @@ const bulkRoleFeature = require('./features/bulkRole');
 const syncFeature = require('./features/categorySync');
 const autoModFeature = require('./features/autoMod');
 const moderationConfig = require('./features/moderationConfig');
+const commandPermissionsFeature = require('./features/commandPermissions');
 const moderationCommands = require('./features/moderationCommands');
 const muteCommands = require('./features/muteCommands');
 const inviteTrackerFeature = require('./features/inviteTracker');
@@ -68,6 +69,7 @@ const menuHandler = createMenuHandler({
   moderation: { presentMenu: moderationConfig.presentMenu },
   invites: { presentMenu: inviteTrackerFeature.presentMenu },
   cleaner: { presentMenu: channelCleanerFeature.presentMenu },
+  permissions: { presentMenu: commandPermissionsFeature.presentMenu },
 });
 
 const interactionFeatures = [
@@ -81,6 +83,7 @@ const interactionFeatures = [
   bulkRoleFeature,
   syncFeature,
   autoModFeature,
+  commandPermissionsFeature,
   moderationConfig,
   inviteTrackerFeature,
   channelCleanerFeature,
@@ -96,6 +99,12 @@ function buildHandlerContext() {
     POSSE_USER_ID: String(process.env.POSSE_USER_ID || '').trim(),
     ALLOWED_GUILD_IDS,
     isGuildAllowed,
+    listRegisteredCommands: () => [...client.commands.values()]
+      .map((command) => ({
+        name: command?.data?.name,
+        description: command?.data?.description || '',
+      }))
+      .filter((cmd) => Boolean(cmd.name)),
   };
 }
 

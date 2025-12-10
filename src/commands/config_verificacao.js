@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, ChannelType, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, ChannelType } = require('discord.js');
 const { checkAccess, ensureGuild } = require('../permissions');
 const { getPrisma } = require('../db');
 
@@ -11,12 +11,9 @@ module.exports = {
     .addChannelOption(o => o.setName('canal_painel').setDescription('Canal onde ficará o painel').addChannelTypes(ChannelType.GuildText).setRequired(false))
     .addRoleOption(o => o.setName('mencionar_1').setDescription('Cargo a mencionar ao abrir ticket').setRequired(false))
     .addRoleOption(o => o.setName('mencionar_2').setDescription('Cargo a mencionar ao abrir ticket').setRequired(false))
-    .addRoleOption(o => o.setName('mencionar_3').setDescription('Cargo a mencionar ao abrir ticket').setRequired(false))
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+    .addRoleOption(o => o.setName('mencionar_3').setDescription('Cargo a mencionar ao abrir ticket').setRequired(false)),
   async execute(interaction) {
-    // Usa sistema de permissões existente; se não configurado, fallback a ManageGuild
-    const allowed = await checkAccess(interaction, 'config_verificacao');
-    if (!allowed && !interaction.memberPermissions.has(PermissionFlagsBits.ManageGuild)) {
+    if (!(await checkAccess(interaction, 'config_verificacao'))) {
       return interaction.reply({ content: 'Sem permissão.', ephemeral: true });
     }
     await ensureGuild(interaction.guild);

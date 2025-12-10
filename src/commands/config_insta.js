@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, ChannelType, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, ChannelType } = require('discord.js');
 const { checkAccess, ensureGuild } = require('../permissions');
 const { getPrisma } = require('../db');
 
@@ -7,11 +7,10 @@ module.exports = {
     .setName('config_insta')
     .setDescription('Configura canais de insta boys e insta girls')
     .addChannelOption(o => o.setName('boys').setDescription('Canal insta boys').addChannelTypes(ChannelType.GuildText).setRequired(false))
-    .addChannelOption(o => o.setName('girls').setDescription('Canal insta girls').addChannelTypes(ChannelType.GuildText).setRequired(false))
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+    .addChannelOption(o => o.setName('girls').setDescription('Canal insta girls').addChannelTypes(ChannelType.GuildText).setRequired(false)),
   async execute(interaction) {
     const allowed = await checkAccess(interaction, 'config_insta');
-    if (!allowed && !interaction.memberPermissions.has(PermissionFlagsBits.ManageGuild)) {
+    if (!allowed) {
       return interaction.reply({ content: 'Sem permissão.', ephemeral: true });
     }
     await ensureGuild(interaction.guild);

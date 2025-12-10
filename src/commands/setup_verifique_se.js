@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, ChannelType, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, ChannelType, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { getPrisma } = require('../db');
 const { checkAccess, ensureGuild } = require('../permissions');
 
@@ -6,11 +6,9 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('setup_verifique_se')
     .setDescription('Publica o painel de verificação com botão Verifique-se')
-    .addChannelOption(o => o.setName('canal').setDescription('Canal alvo').addChannelTypes(ChannelType.GuildText).setRequired(false))
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+    .addChannelOption(o => o.setName('canal').setDescription('Canal alvo').addChannelTypes(ChannelType.GuildText).setRequired(false)),
   async execute(interaction) {
-    const allowed = await checkAccess(interaction, 'setup_verifique_se');
-    if (!allowed && !interaction.memberPermissions.has(PermissionFlagsBits.ManageGuild)) {
+    if (!(await checkAccess(interaction, 'setup_verifique_se'))) {
       return interaction.reply({ content: 'Sem permissão.', ephemeral: true });
     }
     await ensureGuild(interaction.guild);

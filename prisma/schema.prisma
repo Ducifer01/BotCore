@@ -53,6 +53,7 @@ model GlobalConfig {
   channelCleanerPanels     ChannelCleanerPanel[]
   // Mute config avançada
   mutePermissions      MutePermission[]
+  commandPermissions   CommandPermissionGlobal[]
   voiceMutes           VoiceMute[]
   chatMutes            ChatMute[]
   createdAt            DateTime @default(now())
@@ -186,6 +187,17 @@ model MutePermission {
   config         GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
 
   @@unique([globalConfigId, commandType, roleId])
+}
+
+model CommandPermissionGlobal {
+  id             Int          @id @default(autoincrement())
+  globalConfigId Int
+  commandName    String
+  roleId         String
+  config         GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([globalConfigId, commandName, roleId])
+  @@index([commandName])
 }
 
 model SupportTicket {
