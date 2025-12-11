@@ -402,8 +402,8 @@ function buildChannelSelect(antiSpamConfig) {
       ChannelType.GuildForum,
     ]);
   if (antiSpamConfig.ignoredChannels?.length) {
-    select.setDefaultValues(
-      antiSpamConfig.ignoredChannels.slice(0, 25).map((entry) => ({ id: entry.channelId, type: 'channel' })),
+    select.setDefaultChannels(
+      ...antiSpamConfig.ignoredChannels.slice(0, 25).map((entry) => entry.channelId),
     );
   }
   return select;
@@ -416,8 +416,8 @@ function buildRoleSelect(antiSpamConfig) {
     .setMinValues(0)
     .setMaxValues(25);
   if (antiSpamConfig.bypassRoles?.length) {
-    select.setDefaultValues(
-      antiSpamConfig.bypassRoles.slice(0, 25).map((entry) => ({ id: entry.roleId, type: 'role' })),
+    select.setDefaultRoles(
+      ...antiSpamConfig.bypassRoles.slice(0, 25).map((entry) => entry.roleId),
     );
   }
   return select;
@@ -1090,17 +1090,53 @@ async function handleAntiSpamDetection(message, prisma) {
     return false;
   }
   const windowMs = (runtime.perSeconds || DEFAULT_SPAM_CONFIG.perSeconds) * 1000;
-  const timestamps = antiSpamBuckets.get(key) || [];
-  const filtered = timestamps.filter((ts) => now - ts <= windowMs);
-  filtered.push(now);
-  if (filtered.length >= (runtime.messageLimit || DEFAULT_SPAM_CONFIG.messageLimit)) {
+  const bucketEntries = (antiSpamBuckets.get(key) || [])
+    .map((entry) => (typeof entry === 'number'
+      ? { timestamp: entry, messageId: null, channelId: null }
+      : entry))
+    .filter((entry) => entry && typeof entry.timestamp === 'number');
+  const filtered = bucketEntries.filter((entry) => now - entry.timestamp <= windowMs);
+  filtered.push({ timestamp: now, messageId: message.id, channelId: message.channelId });
+  const limit = runtime.messageLimit || DEFAULT_SPAM_CONFIG.messageLimit;
+  if (filtered.length >= limit) {
+    const recentEntries = filtered.slice(-limit);
     antiSpamBuckets.set(key, []);
     antiSpamCooldowns.set(key, now + windowMs);
+    await deleteSpamMessages(message, recentEntries);
     await applyAntiSpamPunishment({ message, member, runtime, prisma });
     return true;
   }
   antiSpamBuckets.set(key, filtered);
   return false;
+}
+
+async function deleteSpamMessages(message, entries) {
+  if (!entries?.length) return;
+  const grouped = new Map();
+  for (const entry of entries) {
+    if (!entry?.messageId || !entry?.channelId) continue;
+    if (!grouped.has(entry.channelId)) {
+      grouped.set(entry.channelId, new Set());
+    }
+    grouped.get(entry.channelId).add(entry.messageId);
+  }
+  for (const [channelId, ids] of grouped.entries()) {
+    const channel = channelId === message.channelId
+      ? message.channel
+      : await message.client.channels.fetch(channelId).catch(() => null);
+    if (!channel || typeof channel.isTextBased !== 'function' || !channel.isTextBased()) continue;
+    for (const id of ids) {
+      const targetMessage = id === message.id
+        ? message
+        : await channel.messages.fetch(id).catch(() => null);
+      if (!targetMessage) continue;
+      if (targetMessage.deletable) {
+        await targetMessage.delete().catch(() => {});
+        continue;
+      }
+      await channel.messages.delete(id).catch(() => {});
+    }
+  }
 }
 
 async function applyAntiSpamPunishment({ message, member, runtime, prisma }) {
@@ -1184,7 +1220,7 @@ async function sendAntiSpamLog({ message, member, reason, durationSeconds, logCh
 async function notifyChannel(message, content) {
   try {
     const sent = await message.channel.send(content);
-    setTimeout(() => sent.delete().catch(() => {}), 8000);
+    setTimeout(() => sent.delete().catch(() => {}), 60000);
   } catch {}
 }
 
