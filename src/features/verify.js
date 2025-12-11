@@ -6,56 +6,9 @@ const { markBotVerifiedRoleAction } = require('../services/verifiedRoleBypass');
 const verifyThreads = new Map(); // threadId -> { targetUserId }
 const pendingVerifyImage = new Map(); // `${threadId}:${verifierId}` -> { buffer, name }
 const pendingVerifySex = new Map(); // `${threadId}:${targetUserId}` -> 'male' | 'female'
-const pendingPreviewMessages = new Map(); // `${threadId}:${verifierId}` -> { embedMessageId, imageMessageId }
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function buildPreviewKey(threadId, verifierId) {
-  return `${threadId}:${verifierId}`;
-}
-
-async function deletePreviewMessage(thread, key) {
-  const record = pendingPreviewMessages.get(key);
-  if (!record || !thread) {
-    pendingPreviewMessages.delete(key);
-    return;
-  }
-  const messageIds = [];
-  if (typeof record === 'string') {
-    messageIds.push(record);
-  } else if (record && typeof record === 'object') {
-    if (record.embedMessageId) messageIds.push(record.embedMessageId);
-    if (record.imageMessageId) messageIds.push(record.imageMessageId);
-  }
-  try {
-    for (const id of messageIds) {
-      if (!id) continue;
-      const existing = await thread.messages.fetch(id).catch(() => null);
-      if (existing) {
-        await existing.delete().catch(() => {});
-      }
-    }
-  } finally {
-    pendingPreviewMessages.delete(key);
-  }
-}
-
-async function publishPreviewMessage(thread, key, payload) {
-  if (!thread) return null;
-  await deletePreviewMessage(thread, key);
-  const { embeds = [], components = [], files = [] } = payload || {};
-  const embedMessage = await thread.send({ embeds, components });
-  let imageMessage = null;
-  if (files.length) {
-    imageMessage = await thread.send({ files, allowedMentions: { parse: [] } });
-  }
-  pendingPreviewMessages.set(key, {
-    embedMessageId: embedMessage.id,
-    imageMessageId: imageMessage?.id || null,
-  });
-  return embedMessage;
 }
 
 function cloneDisabledComponents(rows = []) {
@@ -211,24 +164,19 @@ function buildConfirmRow(threadId, targetUserId, selected) {
   );
 }
 
-function buildPreviewEmbed(targetUserId, verifierId, selectedSex) {
+function buildPreviewMessageContent(targetUserId, verifierId, selectedSex) {
   const sexLabel = selectedSex === 'male' ? 'Masculino'
     : selectedSex === 'female' ? 'Feminino'
       : 'Não definido';
-  const color = selectedSex === 'male' ? 0x3498DB : selectedSex === 'female' ? 0xE91E63 : 0x2C2F33;
   const targetText = targetUserId && targetUserId !== 'unknown' ? `<@${targetUserId}>` : 'Desconhecido';
-  const embed = new EmbedBuilder()
-    .setTitle('Pré-visualização da Verificação')
-    .setDescription([
+    return [
+      '**Pré-visualização da Verificação**',
       `• Usuário: ${targetText}`,
       `• Verificador: <@${verifierId}>`,
       `• Sexo selecionado: **${sexLabel}**`,
       '',
       'Selecione o sexo correto antes de concluir.',
-      'A imagem enviada aparece logo abaixo desta prévia.',
-    ].join('\n'))
-    .setColor(color);
-  return embed;
+    ].join('\n');
 }
 
 async function handleInteraction(interaction, ctx) {
@@ -396,21 +344,21 @@ async function handleStart(interaction, cfg, prisma) {
       const arr = await res.arrayBuffer();
       const buf = Buffer.from(arr);
       const imageName = att.name || 'imagem.png';
-      pendingVerifyImage.set(`${threadId}:${interaction.user.id}`, { buffer: buf, name: imageName });
+      const verifierKey = `${threadId}:${interaction.user.id}`;
+      pendingVerifyImage.set(verifierKey, { buffer: buf, name: imageName });
       pendingVerifySex.delete(`${threadId}:${targetUserId}`);
       await m.delete().catch(() => {});
-  const previewEmbed = buildPreviewEmbed(targetUserId, interaction.user.id, null);
+      const previewContent = buildPreviewMessageContent(targetUserId, interaction.user.id, null);
       const components = [
         buildSexButtons(threadId, targetUserId, null),
         buildConfirmRow(threadId, targetUserId, null),
       ];
-      const key = buildPreviewKey(threadId, interaction.user.id);
       const attachment = new AttachmentBuilder(buf, { name: imageName });
-      await publishPreviewMessage(thread, key, {
-        embeds: [previewEmbed],
+      await interaction.editReply({
+        content: previewContent,
         files: [attachment],
         components,
-      });
+      }).catch(() => {});
     } catch (e) {
       await interaction.followUp({ content: 'Falha ao processar a imagem, tente novamente.', ephemeral: true });
     }
@@ -432,12 +380,15 @@ async function handleSexSelection(interaction, cfg) {
   pendingVerifySex.set(key, sex);
   try {
     await interaction.deferUpdate().catch(() => {});
-    const embed = buildPreviewEmbed(targetUserId, interaction.user.id, sex);
+    const previewContent = buildPreviewMessageContent(targetUserId, interaction.user.id, sex);
     const components = [
       buildSexButtons(threadId, targetUserId, sex),
       buildConfirmRow(threadId, targetUserId, sex),
     ];
-    await interaction.message.edit({ embeds: [embed], components }).catch(() => {});
+    const verifierKey = `${threadId}:${interaction.user.id}`;
+    const img = pendingVerifyImage.get(verifierKey);
+    const files = img ? [new AttachmentBuilder(img.buffer, { name: img.name })] : undefined;
+    await interaction.editReply({ content: previewContent, files, components }).catch(() => {});
   } catch {}
   return true;
 }
@@ -527,8 +478,9 @@ async function handleConfirm(interaction, cfg, prisma) {
   });
   pendingVerifyImage.delete(key);
   pendingVerifySex.delete(sexKey);
-  const previewKey = buildPreviewKey(threadId, interaction.user.id);
-  await deletePreviewMessage(interaction.channel, previewKey);
+  try {
+    await interaction.editReply({ content: 'Pré-visualização concluída.', components: [], attachments: [] }).catch(() => {});
+  } catch {}
   const followUpMessages = [];
   followUpMessages.push(`Verificação concluída para <@${targetUserId}>.`);
   if (cfg?.verifiedRoleId) {
@@ -542,7 +494,7 @@ async function handleConfirm(interaction, cfg, prisma) {
       followUpMessages.push('Não consegui aplicar o cargo automaticamente. Verifique minhas permissões ou reaplique manualmente.');
     }
   }
-  await interaction.followUp({ content: followUpMessages.join('\n'), ephemeral: true });
+  await interaction.followUp({ content: followUpMessages.join('\n'), ephemeral: false });
   return true;
 }
 
@@ -575,14 +527,13 @@ async function handleUpdate(interaction, cfg) {
         buildSexButtons(threadId, targetUserId, selectedSex),
         buildConfirmRow(threadId, targetUserId, selectedSex),
       ];
-      const previewEmbed = buildPreviewEmbed(targetUserId, interaction.user.id, selectedSex);
-      const key = buildPreviewKey(threadId, interaction.user.id);
+      const previewContent = buildPreviewMessageContent(targetUserId, interaction.user.id, selectedSex);
       const attachment = new AttachmentBuilder(buf, { name: att.name || 'imagem.png' });
-      await publishPreviewMessage(thread, key, {
-        embeds: [previewEmbed],
+      await interaction.editReply({
+        content: previewContent,
         files: [attachment],
         components,
-      });
+      }).catch(() => {});
     } catch (e) {
       await interaction.followUp({ content: 'Falha ao processar a imagem, tente novamente.', ephemeral: true });
     }
@@ -622,11 +573,6 @@ async function handleClose(interaction, cfg) {
   for (const key of [...pendingVerifyImage.keys()]) {
     if (key.startsWith(`${threadId}:`)) {
       pendingVerifyImage.delete(key);
-    }
-  }
-  for (const key of [...pendingPreviewMessages.keys()]) {
-    if (key.startsWith(`${threadId}:`)) {
-      await deletePreviewMessage(thread, key);
     }
   }
   return true;
