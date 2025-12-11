@@ -600,8 +600,12 @@ async function handlePostButtons(interaction) {
     const total = await prisma.instaLikeGlobal.count({ where: { postId } });
     const likes = await prisma.instaLikeGlobal.findMany({ where: { postId }, orderBy: { createdAt: 'asc' }, skip, take });
     const totalPages = Math.max(1, Math.ceil(total / take));
+    
+    const author = await interaction.client.users.fetch(post.authorId).catch(() => null);
+    const authorName = author?.username || 'Usuário';
+    
     const embed = new EmbedBuilder()
-      .setTitle(`Likes do post de <@${post.authorId}>`)
+      .setTitle(`Likes do post de ${authorName}`)
       .setColor(0xFFFFFF)
       .setDescription(likes.map((l) => `<@${l.userId}>`).join('\n') || 'Sem curtidas ainda.')
       .setFooter({ text: `Página ${page}/${totalPages} - Total: ${total} likes` });
@@ -617,9 +621,13 @@ async function handlePostButtons(interaction) {
     const total = await prisma.instaCommentGlobal.count({ where: { postId } });
     const comments = await prisma.instaCommentGlobal.findMany({ where: { postId }, orderBy: { createdAt: 'asc' }, skip, take });
     const totalPages = Math.max(1, Math.ceil(total / take));
+    
+    const author = await interaction.client.users.fetch(post.authorId).catch(() => null);
+    const authorName = author?.username || 'Usuário';
+    
     const desc = comments.map((c) => `<@${c.userId}>: ${c.content}`).join('\n') || 'Sem comentários ainda.';
     const embed = new EmbedBuilder()
-      .setTitle(`Comentários do post de <@${post.authorId}>`)
+      .setTitle(`Comentários do post de ${authorName}`)
       .setColor(0xFFFFFF)
       .setDescription(desc)
       .setFooter({ text: `Página ${page}/${totalPages} - Total: ${total} comentários` });
@@ -765,9 +773,10 @@ async function handleMessage(message, ctx) {
     downloaded = await downloadAttachment(att);
     if (downloaded) {
       files.push(new AttachmentBuilder(downloaded.buffer, { name: downloaded.name }));
-      embed.setImage(`attachment://${downloaded.name}`);
+      // image will be sent as a regular attachment (no embed)
     } else {
-      embed.setImage(att.url);
+      // if we couldn't download, still attach by URL so Discord shows it inline
+      files.push({ attachment: att.url, name: att.name || `media-${Date.now()}` });
     }
   } else if (mediaType === 'video' || mediaType === 'other') {
     files.push({ attachment: att.url, name: att.name || `media-${Date.now()}` });
@@ -778,13 +787,14 @@ async function handleMessage(message, ctx) {
   const { id, token } = await getOrCreateWebhook(message.channel);
   const hook = await message.client.fetchWebhook(id, token).catch(() => null);
   if (!hook) return true;
-  const sent = await hook.send({
+  const payload = {
     username: message.member?.nickname || message.author.username,
     avatarURL: message.author.displayAvatarURL?.({ size: 128 }) || undefined,
-    embeds: mediaType === 'image' || mediaType === 'gif' ? [embed] : [],
     files,
     components: [initialRow],
-  });
+  };
+  // send without an embed so Discord shows the attachment(s) normally
+  const sent = await hook.send(payload);
   await message.delete().catch(() => {});
 
   const storedMediaUrl = sent.attachments?.first()?.url || att.url;
