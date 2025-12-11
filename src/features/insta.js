@@ -58,6 +58,19 @@ function extractFilenameFromUrl(url, fallbackName = 'ganhador.png') {
   return fallbackName;
 }
 
+async function deletePostRecords(prisma, postId) {
+  if (!prisma || !postId) return;
+  try {
+    await prisma.$transaction([
+      prisma.instaLikeGlobal.deleteMany({ where: { postId } }),
+      prisma.instaCommentGlobal.deleteMany({ where: { postId } }),
+      prisma.instaPostGlobal.deleteMany({ where: { id: postId } }),
+    ]);
+  } catch (error) {
+    console.warn('[insta] Falha ao limpar registros do post', postId, error?.message || error);
+  }
+}
+
 async function downloadAttachment(attachment) {
   try {
     const response = await fetch(attachment.url);
@@ -480,6 +493,14 @@ async function performInstaReset(interaction, prisma) {
 
   const summaries = [];
   for (const chId of channelIds) {
+    const keepIds = new Set(
+      (
+        await prisma.instaWinnerGlobal.findMany({
+          where: { channelId: chId },
+          select: { postId: true, winnerMessageId: true },
+        })
+      ).flatMap((entry) => [entry.postId, entry.winnerMessageId].filter(Boolean)),
+    );
     const posts = await prisma.instaPostGlobal.findMany({ where: { channelId: chId }, orderBy: { likeCount: 'desc' } });
     if (!posts.length) {
       summaries.push(`Sem posts novos em <#${chId}>.`);
@@ -490,12 +511,18 @@ async function performInstaReset(interaction, prisma) {
       summaries.push(`Não consegui acessar <#${chId}>.`);
       continue;
     }
-    const keepMessageIds = [];
     const winner = posts[0];
     if (winner) {
+      const winnerMessage = await channel.messages.fetch(winner.id).catch(() => null);
+      if (winnerMessage) {
+        keepIds.add(winnerMessage.id);
+        if (winnerMessage.components?.length) {
+          await winnerMessage.edit({ components: [] }).catch(() => {});
+        }
+      }
       const announcement = await sendWinnerAnnouncement(channel, winner);
       if (announcement) {
-        keepMessageIds.push(announcement.id);
+        keepIds.add(announcement.id);
       }
       await prisma.instaWinnerGlobal.create({
         data: {
@@ -506,16 +533,15 @@ async function performInstaReset(interaction, prisma) {
           winnerMessageId: announcement?.id,
         },
       });
+      await deletePostRecords(prisma, winner.id);
       summaries.push(`Ganhador anunciado em <#${chId}>.`);
     }
     for (const p of posts) {
       if (winner && p.id === winner.id) continue;
-      await prisma.instaLikeGlobal.deleteMany({ where: { postId: p.id } });
-      await prisma.instaCommentGlobal.deleteMany({ where: { postId: p.id } });
-      await prisma.instaPostGlobal.delete({ where: { id: p.id } });
+      await deletePostRecords(prisma, p.id);
       await channel.messages.delete(p.id).catch(() => {});
     }
-    await purgeInstaChannel(channel, keepMessageIds);
+    await purgeInstaChannel(channel, Array.from(keepIds));
   }
 
   const message = summaries.length ? summaries.join(' ') : 'Reset concluído.';
@@ -797,8 +823,7 @@ async function handleMessage(message, ctx) {
     return true;
   }
   const requiredSex = message.channelId === cfg.instaBoysChannelId ? 'male'
-    : message.channelId === cfg.instaGirlsChannelId ? 'female'
-      : null;
+    : message.channelId === cfg.instaGirlsChannelId ? 'female' : null;
   if (requiredSex && verifiedUser.sex !== requiredSex) {
     await message.delete().catch(() => {});
     instaWebhookBlock.set(message.channelId, Date.now() + 6000);
@@ -913,6 +938,23 @@ async function wasVerifiedRoleAddByBot(guild, targetUserId, roleId) {
     console.warn('[verify-protect] Falha ao consultar audit log para ver cargo verificado:', err?.message || err);
   }
   return false;
+}
+
+async function wipeChannelRecords(channelId) {
+  const posts = await prisma.instaPostGlobal.findMany({
+    where: { channelId },
+    select: { id: true },
+  });
+
+  if (!posts.length) return;
+
+  const postIds = posts.map((post) => post.id);
+
+  await prisma.$transaction([
+    prisma.instaLikeGlobal.deleteMany({ where: { postId: { in: postIds } } }),
+    prisma.instaCommentGlobal.deleteMany({ where: { postId: { in: postIds } } }),
+    prisma.instaPostGlobal.deleteMany({ where: { id: { in: postIds } } }),
+  ]);
 }
 
 module.exports = {
