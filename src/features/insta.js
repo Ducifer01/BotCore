@@ -43,6 +43,21 @@ function guessAttachmentExtension(contentType) {
   return '.dat';
 }
 
+function extractFilenameFromUrl(url, fallbackName = 'ganhador.png') {
+  if (!url) return fallbackName;
+  try {
+    const parsed = new URL(url);
+    const pathname = parsed.pathname || '';
+    const lastSegment = pathname.split('/').filter(Boolean).pop();
+    if (lastSegment && lastSegment.includes('.')) {
+      return lastSegment;
+    }
+  } catch (_) {
+    // ignore parsing errors
+  }
+  return fallbackName;
+}
+
 async function downloadAttachment(attachment) {
   try {
     const response = await fetch(attachment.url);
@@ -475,17 +490,12 @@ async function performInstaReset(interaction, prisma) {
       summaries.push(`Não consegui acessar <#${chId}>.`);
       continue;
     }
+    const keepMessageIds = [];
     const winner = posts[0];
     if (winner) {
-      const text = `Ganhador da semana\n<@${winner.authorId}>\n${winner.likeCount} curtidas`;
-      const isImage = winner.mediaType === 'image' || winner.mediaType === 'gif';
-      const embed = new EmbedBuilder().setDescription(text).setColor(0x2ECC71);
-      if (isImage) embed.setImage(winner.mediaUrl);
-      let msg;
-      if (isImage) {
-        msg = await channel.send({ embeds: [embed] });
-      } else {
-        msg = await channel.send({ content: text, files: [{ attachment: winner.mediaUrl, name: 'midia' }] });
+      const announcement = await sendWinnerAnnouncement(channel, winner);
+      if (announcement) {
+        keepMessageIds.push(announcement.id);
       }
       await prisma.instaWinnerGlobal.create({
         data: {
@@ -493,7 +503,7 @@ async function performInstaReset(interaction, prisma) {
           postId: winner.id,
           winnerUserId: winner.authorId,
           likeCount: winner.likeCount,
-          winnerMessageId: msg.id,
+          winnerMessageId: announcement?.id,
         },
       });
       summaries.push(`Ganhador anunciado em <#${chId}>.`);
@@ -505,10 +515,59 @@ async function performInstaReset(interaction, prisma) {
       await prisma.instaPostGlobal.delete({ where: { id: p.id } });
       await channel.messages.delete(p.id).catch(() => {});
     }
+    await purgeInstaChannel(channel, keepMessageIds);
   }
 
   const message = summaries.length ? summaries.join(' ') : 'Reset concluído.';
   return renderHome(interaction, prisma, { type: 'success', message });
+}
+
+async function sendWinnerAnnouncement(channel, winner) {
+  if (!channel) return null;
+  const content = `**Ganhador da semana**\n<@${winner.authorId}>\n${winner.likeCount} curtidas`;
+  const payload = {
+    content,
+    allowedMentions: { users: [winner.authorId], roles: [], repliedUser: false },
+  };
+  if (winner.mediaUrl) {
+    const derivedName = extractFilenameFromUrl(winner.mediaUrl);
+    payload.files = [{ attachment: winner.mediaUrl, name: derivedName }];
+  }
+  try {
+    return await channel.send(payload);
+  } catch (error) {
+    console.warn('[insta] Falha ao enviar anúncio de ganhador:', error?.message || error);
+    return null;
+  }
+}
+
+async function purgeInstaChannel(channel, keepMessageIds = []) {
+  if (!channel || typeof channel.messages?.fetch !== 'function') return;
+  const keepSet = new Set((keepMessageIds || []).filter(Boolean));
+  let lastMessageId;
+  for (let cycle = 0; cycle < 5; cycle += 1) {
+    const batch = await channel.messages.fetch({ limit: 100, before: lastMessageId }).catch(() => null);
+    if (!batch?.size) break;
+    for (const [, message] of batch) {
+      if (keepSet.has(message.id)) continue;
+      if (message.pinned) continue;
+      if (isWinnerMessage(message)) continue;
+      await message.delete().catch(() => {});
+    }
+    const last = batch.last();
+    if (!last) break;
+    lastMessageId = last.id;
+  }
+}
+
+function isWinnerMessage(message) {
+  if (!message) return false;
+  const content = (message.content || '').toLowerCase();
+  if (content.includes('ganhador da semana')) return true;
+  if (Array.isArray(message.embeds)) {
+    return message.embeds.some((embed) => (embed?.description || '').toLowerCase().includes('ganhador da semana'));
+  }
+  return false;
 }
 
 async function updatePostComponents(client, post, likeCount, commentCount, options = {}) {
