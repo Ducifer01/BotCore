@@ -8,13 +8,41 @@ const instaWebhookBlock = new Map();
 
 function buildPostActionRow(postId, likeCount = '0', commentCount = '0') {
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`insta:like:${postId}`).setEmoji('❤️').setLabel(likeCount).setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`insta:comment:${postId}`).setEmoji('💬').setLabel(commentCount).setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`insta:listlikes:${postId}:1`).setEmoji('📃').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`insta:listcomments:${postId}:1`).setEmoji('📝').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`insta:delete:${postId}`).setEmoji('🗑️').setStyle(ButtonStyle.Danger),
+
+    // ❤️ LIKE
+    new ButtonBuilder()
+      .setCustomId(`insta:like:${postId}`)
+      .setEmoji({ id: '1448504228564701246', name: ':heartblue:' }) // <--- SUBSTITUA AQUI
+      .setLabel(likeCount)
+      .setStyle(ButtonStyle.Secondary),
+
+    // 💬 COMMENT
+    new ButtonBuilder()
+      .setCustomId(`insta:comment:${postId}`)
+      .setEmoji({ id: '1448504289466126551', name: 'commentblue' }) // <--- SUBSTITUA AQUI
+      .setLabel(commentCount)
+      .setStyle(ButtonStyle.Secondary),
+
+    // 📃 LISTAR LIKES
+    new ButtonBuilder()
+      .setCustomId(`insta:listlikes:${postId}:1`)
+      .setEmoji({ id: '1448504341924155392', name: 'heartcomment' }) // <--- SUBSTITUA AQUI
+      .setStyle(ButtonStyle.Secondary),
+
+    // 📝 LISTAR COMMENTS
+    new ButtonBuilder()
+      .setCustomId(`insta:listcomments:${postId}:1`)
+      .setEmoji({ id: '1448507678568484864', name: 'comentarios' }) // <--- SUBSTITUA AQUI
+      .setStyle(ButtonStyle.Secondary),
+
+    // 🗑️ DELETE
+    new ButtonBuilder()
+      .setCustomId(`insta:delete:${postId}`)
+      .setEmoji({ id: '1448504437906739251', name: 'TrashBlue' }) // <--- SUBSTITUA AQUI
+      .setStyle(ButtonStyle.Danger),
   );
 }
+
 
 function buildPaginationRow(type, postId, page, totalPages) {
   const prevPage = Math.max(1, page - 1);
@@ -867,9 +895,15 @@ async function handleMessage(message, ctx) {
   const { id, token } = await getOrCreateWebhook(message.channel);
   const hook = await message.client.fetchWebhook(id, token).catch(() => null);
   if (!hook) return true;
+  const rawCaption = message.content || '';
+  const sanitizedCaption = rawCaption.trim();
+  const formattedCaption = sanitizedCaption.length
+    ? `> <@${message.author.id}>: ${sanitizedCaption.replace(/\r?\n/g, '\n> ')}`
+    : `> <@${message.author.id}>:`;
   const payload = {
     username: message.member?.nickname || message.author.username,
     avatarURL: message.author.displayAvatarURL?.({ size: 128 }) || undefined,
+    content: formattedCaption,
     files,
     components: [initialRow],
   };
