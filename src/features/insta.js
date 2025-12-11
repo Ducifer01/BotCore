@@ -497,9 +497,11 @@ async function performInstaReset(interaction, prisma) {
       (
         await prisma.instaWinnerGlobal.findMany({
           where: { channelId: chId },
-          select: { postId: true, winnerMessageId: true },
+          select: { winnerMessageId: true },
         })
-      ).flatMap((entry) => [entry.postId, entry.winnerMessageId].filter(Boolean)),
+      )
+        .map((entry) => entry.winnerMessageId)
+        .filter(Boolean),
     );
     const posts = await prisma.instaPostGlobal.findMany({ where: { channelId: chId }, orderBy: { likeCount: 'desc' } });
     if (!posts.length) {
@@ -513,13 +515,6 @@ async function performInstaReset(interaction, prisma) {
     }
     const winner = posts[0];
     if (winner) {
-      const winnerMessage = await channel.messages.fetch(winner.id).catch(() => null);
-      if (winnerMessage) {
-        keepIds.add(winnerMessage.id);
-        if (winnerMessage.components?.length) {
-          await winnerMessage.edit({ components: [] }).catch(() => {});
-        }
-      }
       const announcement = await sendWinnerAnnouncement(channel, winner);
       if (announcement) {
         keepIds.add(announcement.id);
@@ -534,6 +529,7 @@ async function performInstaReset(interaction, prisma) {
         },
       });
       await deletePostRecords(prisma, winner.id);
+      await channel.messages.delete(winner.id).catch(() => {});
       summaries.push(`Ganhador anunciado em <#${chId}>.`);
     }
     for (const p of posts) {
