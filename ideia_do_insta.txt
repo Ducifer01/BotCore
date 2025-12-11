@@ -50,7 +50,7 @@ cor do embed = branco
 Com 2 botões de Voltar e Próximo <- Navbar, para caso exista muitos comentários.
 
 
-Comando: /reset_insta Quando esse comando for executado o bot envia embed ephemeral True pedindo para confirmar "Tem certeza?" Botão "Sim"verde e botão "Não" Vermelho". Botão "Não" apenas fecha o embed (apaga). Botão "Sim" ao ser interagido com sucesso (apenas cargo e ou id de pessoa permitida, configurado no bot, poderá interagir com sucesso) reseta os dois canais de instagram, o insta boys e insta girls. 
+No painel **Configurar Insta** dentro do `/menu`, há um botão de reset que envia embed ephemeral pedindo para confirmar "Tem certeza?" com botões "Sim" (verde) e "Não" (vermelho). O botão "Não" apenas fecha o embed; o "Sim" (restrito a cargos autorizados) executa o reset dos canais insta boys e insta girls.
 
 Ele enviará mensagem seguindo esse formato:
 Ganhador da semana

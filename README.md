@@ -90,8 +90,7 @@ Notas rápidas:
 - `!verificado <id/menção>` — exibe embed com quem verificou, status atual e foto arquivada (somente cargos autorizados).
 
 ### Verificação de usuários
-- `/config_verificacao [cargo_principal] [cargo_verificado] [canal_painel] [mencionar_1..3]` — configura cargos e canal do painel; você pode rodar várias vezes para ajustar.
-- `/setup_verifique_se [canal]` — publica o painel "Verifique-se" com botão; ao clicar, o usuário abre um tópico privado.
+- Acesse `/menu` e selecione **Configurar Verificação** para definir cargos, canais e o painel "Verifique-se". O painel único permite ajustar cargos mencionados, canal do painel e publicar/atualizar a mensagem com o botão **Verifique-se**.
 
 Fluxo:
 - Somente o cargo principal pode usar os botões "Verificar" e "Encerrar" dentro do tópico.
@@ -113,8 +112,7 @@ Fluxo:
 - O embed no log é vermelho, com título “:Planilha: | Ticket suporte”, lista quem abriu/fechou e traz o horário nativo do Discord no rodapé.
 
 ### Insta boys/girls
-- `/config_insta [boys:<canal>] [girls:<canal>]` — define os canais de insta.
-- `/reset_insta` — confirma e, para cada canal configurado, anuncia o post com mais curtidas como "Ganhador da semana" e limpa os demais posts (preserva anúncios de ganhadores anteriores).
+- Configure tudo pelo `/menu` em **Configurar Insta**: escolha os canais boys/girls, publique o painel e execute as rotinas de reset direto pelos botões do painel (com confirmação visual antes de limpar os canais).
 
 Uso:
 - Nos canais configurados, somente usuários verificados podem postar mídia. O bot apaga mensagens de mídia de não verificados.
