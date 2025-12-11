@@ -124,11 +124,15 @@ Uso:
 	- 🗑️ excluir (apenas o autor)
 
 ### AutoMod
-- Dentro do `/menu`, escolha **Configurar AutoMod** para editar palavras bloqueadas e o tipo de punição.
-- **Palavras Bloqueadas**: ao clicar em "Inserir palavras", um sub-embed orienta o envio de um arquivo `.txt` com termos separados por vírgula (ex.: `palavra1, palavra2`). Digitar **cancelar** aborta o processo. As palavras novas são adicionadas ao banco, ignorando duplicatas automaticamente.
-- **Tipo Punição**: escolha entre "Apagar" (remove somente a mensagem) ou "Castigar e apagar" (remove e aplica timeout). Ao habilitar castigo, use "Definir tempo" para escolher rapidamente 60s, 5m, 10m, 1h, 1d ou 1 semana.
-- O motivo aplicado em exclusões/timeouts é sempre **"Palavra Proibida"**.
-- Durante a operação em massa de cargos (`/add_cargo_all`), o painel indica claramente quais cargos são ignorados; já durante execuções do AutoMod, o bot informa no canal que removeu a mensagem e opcionalmente pune o autor.
+- Dentro do `/menu`, escolha **Configurar AutoMod** para abrir o painel principal. A mensagem continua sendo **uma única interação ephemeral** e agora traz um select para escolher o módulo desejado (Anti-Palavras ou Anti-Spam).
+- **Anti-Palavras**:
+	- Em "Palavras Bloqueadas", o botão **Inserir palavras** guia o envio de um arquivo `.txt` com termos separados por vírgula (ex.: `palavra1, palavra2`). Digitar **cancelar** aborta o processo. Termos duplicados são ignorados automaticamente.
+	- Em "Tipo de Punição", escolha entre **Apagar** (remove apenas a mensagem) ou **Castigar e apagar** (remove e aplica timeout). Ao ativar castigo, clique em **Definir tempo** para selecionar rapidamente 60s, 5m, 10m, 1h, 1d ou 1 semana. O motivo aplicado permanece **"Palavra Proibida"**.
+- **Anti-Spam**:
+	- O painel mostra status atual, limite configurado (mensagens por janela), punição ativa, cargo de mute configurado em `/menu mute`, além das listas de canais ignorados e cargos isentos.
+	- Botões dedicados permitem **Ativar/Desativar**, abrir modal para **Configurar limite** (1–100 mensagens em até 600 segundos), **Configurar punição** (modo Mute ou Castigo com tempos próprios) e **Restaurar padrão**.
+	- Os Channel/Role Selects permitem escolher até 25 canais e 25 cargos de exceção, sempre respeitando a filosofia de “uma mensagem, vários estados”.
+	- Ao detectar spam, o bot aplica automaticamente mute no chat (usando o cargo já definido) ou timeout, registra o embed no mesmo formato do comando manual `!mute`, envia log no canal configurado e remove a mensagem de aviso após alguns segundos.
 
 ### Ranking de Convites
 - Abra `/menu` e selecione **Configurar Convites** para ativar/desativar o rastreamento. O botão de toggle muda entre verde (ativo) e vermelho (desativado) e o painel sempre opera em uma única mensagem ephemeral.

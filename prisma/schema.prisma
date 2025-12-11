@@ -57,6 +57,7 @@ model GlobalConfig {
   commandPermissions   CommandPermissionGlobal[]
   voiceMutes           VoiceMute[]
   chatMutes            ChatMute[]
+  antiSpamConfig       AntiSpamConfig?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 }
@@ -99,6 +100,40 @@ model AutoModBlockedWord {
   createdAt       DateTime      @default(now())
 
   @@unique([autoModConfigId, word])
+}
+
+model AntiSpamConfig {
+  id                     Int      @id @default(autoincrement())
+  globalConfigId         Int      @unique
+  enabled                Boolean  @default(false)
+  messageLimit           Int      @default(5)
+  perSeconds             Int      @default(5)
+  punishmentMode         String   @default("MUTE")
+  muteDurationSeconds    Int      @default(300)
+  timeoutDurationSeconds Int      @default(300)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  config                 GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
+  ignoredChannels        AntiSpamIgnoredChannel[]
+  bypassRoles            AntiSpamBypassRole[]
+}
+
+model AntiSpamIgnoredChannel {
+  id               Int             @id @default(autoincrement())
+  antiSpamConfigId Int
+  channelId        String
+  config           AntiSpamConfig  @relation(fields: [antiSpamConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([antiSpamConfigId, channelId])
+}
+
+model AntiSpamBypassRole {
+  id               Int             @id @default(autoincrement())
+  antiSpamConfigId Int
+  roleId           String
+  config           AntiSpamConfig  @relation(fields: [antiSpamConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([antiSpamConfigId, roleId])
 }
 
 model ModerationConfig {

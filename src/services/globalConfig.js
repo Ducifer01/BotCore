@@ -12,6 +12,12 @@ async function getGlobalConfig(prisma = getPrisma()) {
           blockedWords: true,
         },
       },
+      antiSpamConfig: {
+        include: {
+          ignoredChannels: true,
+          bypassRoles: true,
+        },
+      },
       moderationConfig: {
         include: {
           permissions: true,
