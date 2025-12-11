@@ -1102,8 +1102,8 @@ async function handleAntiSpamDetection(message, prisma) {
     const recentEntries = filtered.slice(-limit);
     antiSpamBuckets.set(key, []);
     antiSpamCooldowns.set(key, now + windowMs);
-    await deleteSpamMessages(message, recentEntries);
     await applyAntiSpamPunishment({ message, member, runtime, prisma });
+    await deleteSpamMessages(message, recentEntries);
     return true;
   }
   antiSpamBuckets.set(key, filtered);
