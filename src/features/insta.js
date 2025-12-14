@@ -199,7 +199,7 @@ function buildInstaEmbed(cfg, status) {
     `• Insta Girls: ${cfg?.instaGirlsChannelId ? `<#${cfg.instaGirlsChannelId}>` : 'não definido'}`,
     `• Fotos Masculino: ${cfg?.photosMaleChannelId ? `<#${cfg.photosMaleChannelId}>` : 'não definido'}`,
     `• Fotos Feminino: ${cfg?.photosFemaleChannelId ? `<#${cfg.photosFemaleChannelId}>` : 'não definido'}`,
-    `• Cargo Principal: ${cfg?.mainRoleId ? `<@&${cfg.mainRoleId}>` : 'não definido'}`,
+    `• InstaMod: ${cfg?.mainRoleId ? `<@&${cfg.mainRoleId}>` : 'não definido'}`,
     `• Cargo Verificado: ${cfg?.verifiedRoleId ? `<@&${cfg.verifiedRoleId}>` : 'não definido'}`,
     `• Painel Verifique-se: ${cfg?.verifyPanelChannelId ? `<#${cfg.verifyPanelChannelId}>` : 'não definido'}`,
     `• Cargos Notificados: ${cfg?.ticketPingRolesGlobal?.length ? cfg.ticketPingRolesGlobal.map((r) => `<@&${r.roleId}>`).join(', ') : 'nenhum definido'}`,
@@ -220,7 +220,7 @@ function buildInstaMenuRows() {
     new ButtonBuilder().setCustomId('menu:insta:photos_female').setLabel('Fotos Feminino').setStyle(ButtonStyle.Secondary),
   );
   const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('menu:insta:mainrole').setLabel('Cargo Principal').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('menu:insta:mainrole').setLabel('InstaMod').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('menu:insta:verifiedrole').setLabel('Cargo Verificado').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('menu:insta:pings').setLabel('Cargos Notificados').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('menu:insta:verifypanel').setLabel('Painel Verifique-se').setStyle(ButtonStyle.Secondary),
@@ -316,7 +316,7 @@ async function handleConfigButtons(interaction, ctx) {
   if (action === 'mainrole' || action === 'verifiedrole') {
     const isMain = action === 'mainrole';
     return showRolePrompt(interaction, {
-      title: isMain ? 'Cargo Principal' : 'Cargo Verificado',
+      title: isMain ? 'InstaMod' : 'Cargo Verificado',
       description: isMain
         ? 'Escolha o cargo que pode verificar, encerrar e operar o sistema.'
         : 'Escolha o cargo aplicado aos usuários verificados.',
@@ -428,7 +428,7 @@ async function handleConfigSelect(interaction, ctx) {
     });
     return renderHome(interaction, prisma, {
       type: 'success',
-      message: `${target === 'mainrole' ? 'Cargo principal' : 'Cargo verificado'} definido: <@&${roleId}>`,
+      message: `${target === 'mainrole' ? 'InstaMod' : 'Cargo verificado'} definido: <@&${roleId}>`,
     });
   }
 

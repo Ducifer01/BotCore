@@ -19,7 +19,7 @@ function buildSupportConfigEmbed(cfg) {
 
 function getSupportPanelPayload() {
   const embed = new EmbedBuilder()
-    .setTitle('Insônia - Suporte')
+    .setTitle('Sistema de Suporte')
     .setDescription('Alguém no servidor está te incomodando? Utilize esse sistema para reportar um membro.')
     .setColor(SUPPORT_EMBED_COLOR);
   const row = new ActionRowBuilder().addComponents(

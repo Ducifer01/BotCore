@@ -1,15 +1,10 @@
-const { ChannelType, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, Routes, RESTJSONErrorCodes } = require('discord.js');
+const { ChannelType, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, Routes, RESTJSONErrorCodes } = require('discord.js');
 const { getPrisma } = require('../db');
 const { getGlobalConfig } = require('../services/globalConfig');
+const { requireInstaConfig } = require('../services/instaGuard');
 const { markBotVerifiedRoleAction } = require('../services/verifiedRoleBypass');
 
 const verifyThreads = new Map(); // threadId -> { targetUserId }
-const pendingVerifyImage = new Map(); // `${threadId}:${verifierId}` -> { buffer, name }
-const pendingVerifySex = new Map(); // `${threadId}:${targetUserId}` -> 'male' | 'female'
-
-function wait(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function cloneDisabledComponents(rows = []) {
   return rows.map((row) => {
@@ -44,22 +39,6 @@ function extractUserIdFromThreadName(name) {
   if (!name) return null;
   const match = /^verif-(\d{5,25})/i.exec(name);
   return match?.[1] || null;
-}
-
-async function resolveThreadTargetUserId(threadId, fallbackUserId, guild) {
-  const cached = verifyThreads.get(threadId)?.targetUserId;
-  if (cached) return cached;
-  if (fallbackUserId && fallbackUserId !== 'unknown') {
-    return cacheThreadTargetUser(threadId, fallbackUserId);
-  }
-  if (guild) {
-    const thread = await guild.channels.fetch(threadId).catch(() => null);
-    const derived = extractUserIdFromThreadName(thread?.name);
-    if (derived) {
-      return cacheThreadTargetUser(threadId, derived);
-    }
-  }
-  return null;
 }
 
 async function fetchMemberSafe(guild, userId) {
@@ -141,76 +120,27 @@ async function removeVerifiedRole(guild, roleId, userId, reason) {
   }
 }
 
-function buildSexButtons(threadId, targetUserId, selected) {
-  const maleBtn = new ButtonBuilder()
-    .setCustomId(`verify:sex:male:${threadId}:${targetUserId}`)
-    .setLabel('Sexo Masculino')
-    .setStyle(selected === 'male' ? ButtonStyle.Success : ButtonStyle.Secondary);
-  const femaleBtn = new ButtonBuilder()
-    .setCustomId(`verify:sex:female:${threadId}:${targetUserId}`)
-    .setLabel('Sexo Feminino')
-    .setStyle(selected === 'female' ? ButtonStyle.Success : ButtonStyle.Secondary);
-  return new ActionRowBuilder().addComponents(maleBtn, femaleBtn);
-}
-
-function buildConfirmRow(threadId, targetUserId, selected) {
-  return new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`verify:confirm:${threadId}:${targetUserId}`)
-      .setLabel('Perfeito')
-      .setStyle(ButtonStyle.Success)
-      .setDisabled(!selected),
-    new ButtonBuilder().setCustomId(`verify:update:${threadId}`).setLabel('Atualizar').setStyle(ButtonStyle.Primary),
-  );
-}
-
-function buildPreviewMessageContent(targetUserId, verifierId, selectedSex) {
-  const sexLabel = selectedSex === 'male' ? 'Masculino'
-    : selectedSex === 'female' ? 'Feminino'
-      : 'Não definido';
-  const targetText = targetUserId && targetUserId !== 'unknown' ? `<@${targetUserId}>` : 'Desconhecido';
-    return [
-      '**Pré-visualização da Verificação**',
-      `• Usuário: ${targetText}`,
-      `• Verificador: <@${verifierId}>`,
-      `• Sexo selecionado: **${sexLabel}**`,
-      '',
-      'Selecione o sexo correto antes de concluir.',
-    ].join('\n');
-}
-
 async function handleInteraction(interaction, ctx) {
   if (!interaction.isButton()) return false;
   const { customId } = interaction;
   if (!customId.startsWith('verify:')) return false;
   const prisma = getPrisma();
   const cfg = await getGlobalConfig(prisma);
-  if (!cfg?.mainRoleId) {
-    await interaction.reply({ content: 'Sistema de verificação não configurado.', ephemeral: true });
+  const instaCheck = requireInstaConfig(cfg);
+  if (!instaCheck.ok) {
+    await interaction.reply({ content: instaCheck.message, ephemeral: true });
     return true;
   }
   if (!interaction.member.roles.cache.has(cfg.mainRoleId)) {
     const isSelfGrant = customId.startsWith('verify:grantrole:');
     if (!isSelfGrant && customId !== 'verify:open') {
-      await interaction.reply({ content: 'Apenas o cargo principal pode usar este botão.', ephemeral: true });
+      await interaction.reply({ content: 'Apenas o InstaMod pode usar este botão.', ephemeral: true });
       return true;
     }
   }
 
   if (customId === 'verify:open') {
     return openThread(interaction, cfg, prisma);
-  }
-  if (customId.startsWith('verify:start:')) {
-    return handleStart(interaction, cfg, prisma);
-  }
-  if (customId.startsWith('verify:sex:')) {
-    return handleSexSelection(interaction, cfg);
-  }
-  if (customId.startsWith('verify:confirm:')) {
-    return handleConfirm(interaction, cfg, prisma);
-  }
-  if (customId.startsWith('verify:update:')) {
-    return handleUpdate(interaction, cfg);
   }
   if (customId.startsWith('verify:close:')) {
     return handleClose(interaction, cfg);
@@ -294,10 +224,12 @@ async function openThread(interaction, cfg, prisma) {
   const ping = [mainRoleMention, ...mentionRoles, `<@${interaction.user.id}>`].filter(Boolean).join(' ');
   const embed = new EmbedBuilder()
     .setTitle('Verificação')
-    .setDescription('Aguarde um responsável pela verificação. Use os botões abaixo quando estiver atendendo.')
+    .setDescription([
+      'Aguarde um responsável pela verificação. Use o botão abaixo apenas quando o atendimento estiver concluído.',
+      '⚠️ Somente o cargo InstaMod deve executar o comando `/verificar` dentro deste tópico para finalizar a análise.',
+    ].join('\n\n'))
     .setColor(0x2ECC71);
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`verify:start:${thread.id}:${interaction.user.id}`).setLabel('Verificar').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`verify:close:${thread.id}`).setLabel('Encerrar').setStyle(ButtonStyle.Danger),
   );
   await thread.send({
@@ -314,243 +246,12 @@ async function openThread(interaction, cfg, prisma) {
   return true;
 }
 
-async function handleStart(interaction, cfg, prisma) {
-  if (!cfg?.mainRoleId || !interaction.member.roles.cache.has(cfg.mainRoleId)) {
-    await interaction.reply({ content: 'Apenas o cargo principal pode usar este botão.', ephemeral: true });
-    return true;
-  }
-  const [, , threadId, targetUserId] = interaction.customId.split(':');
-  cacheThreadTargetUser(threadId, targetUserId);
-  const existingRecord = await prisma.verifiedUserGlobal.findUnique({ where: { userId: targetUserId } }).catch(() => null);
-  if (existingRecord) {
-    await interaction.reply({ content: 'Esse usuário já está verificado. Para remover, use o comando: !remover_verificado <id/menção>.', ephemeral: true });
-    return true;
-  }
-  if (interaction.channelId !== threadId) {
-    try {
-      const thread = await interaction.guild.channels.fetch(threadId).catch(() => null);
-      if (thread) await thread.send({ content: `<@${interaction.user.id}> iniciou verificação.` });
-    } catch {}
-  }
-  await interaction.reply({ content: 'Envie uma imagem nesta conversa (tópico). Assim que você enviar, vou mostrar uma prévia e pedir confirmação.', ephemeral: true });
-  const thread = await interaction.guild.channels.fetch(threadId).catch(() => null);
-  if (!thread) return true;
-  const filter = (m) => m.author.id === interaction.user.id && m.attachments.size > 0;
-  const collector = thread.createMessageCollector({ filter, time: 5 * 60 * 1000, max: 1 });
-  collector.on('collect', async (m) => {
-    try {
-      const att = m.attachments.first();
-      const res = await fetch(att.url);
-      const arr = await res.arrayBuffer();
-      const buf = Buffer.from(arr);
-      const imageName = att.name || 'imagem.png';
-      const verifierKey = `${threadId}:${interaction.user.id}`;
-      pendingVerifyImage.set(verifierKey, { buffer: buf, name: imageName });
-      pendingVerifySex.delete(`${threadId}:${targetUserId}`);
-      await m.delete().catch(() => {});
-      const previewContent = buildPreviewMessageContent(targetUserId, interaction.user.id, null);
-      const components = [
-        buildSexButtons(threadId, targetUserId, null),
-        buildConfirmRow(threadId, targetUserId, null),
-      ];
-      const attachment = new AttachmentBuilder(buf, { name: imageName });
-      await interaction.editReply({
-        content: previewContent,
-        files: [attachment],
-        components,
-      }).catch(() => {});
-    } catch (e) {
-      await interaction.followUp({ content: 'Falha ao processar a imagem, tente novamente.', ephemeral: true });
-    }
-  });
-  return true;
-}
-
-async function handleSexSelection(interaction, cfg) {
-  if (!cfg?.mainRoleId || !interaction.member.roles.cache.has(cfg.mainRoleId)) {
-    await interaction.reply({ content: 'Apenas o cargo principal pode definir o sexo do usuário.', ephemeral: true });
-    return true;
-  }
-  const [, , sex, threadId, targetUserId] = interaction.customId.split(':');
-  if (!['male', 'female'].includes(sex)) {
-    await interaction.reply({ content: 'Opção inválida.', ephemeral: true });
-    return true;
-  }
-  const key = `${threadId}:${targetUserId}`;
-  pendingVerifySex.set(key, sex);
-  try {
-    await interaction.deferUpdate().catch(() => {});
-    const previewContent = buildPreviewMessageContent(targetUserId, interaction.user.id, sex);
-    const components = [
-      buildSexButtons(threadId, targetUserId, sex),
-      buildConfirmRow(threadId, targetUserId, sex),
-    ];
-    const verifierKey = `${threadId}:${interaction.user.id}`;
-    const img = pendingVerifyImage.get(verifierKey);
-    const files = img ? [new AttachmentBuilder(img.buffer, { name: img.name })] : undefined;
-    await interaction.editReply({ content: previewContent, files, components }).catch(() => {});
-  } catch {}
-  return true;
-}
-
-async function handleConfirm(interaction, cfg, prisma) {
-  await interaction.deferUpdate().catch(() => {});
-  if (!cfg?.mainRoleId || !interaction.member.roles.cache.has(cfg.mainRoleId)) {
-    await interaction.followUp({ content: 'Apenas o cargo principal pode confirmar.', ephemeral: true });
-    return true;
-  }
-  const [, , threadId, targetUserIdFromCustom] = interaction.customId.split(':');
-  const targetUserId = await resolveThreadTargetUserId(threadId, targetUserIdFromCustom, interaction.guild);
-  if (!targetUserId) {
-    await interaction.followUp({ content: 'Não consegui identificar o usuário do ticket. Reabra o fluxo.', ephemeral: true });
-    return true;
-  }
-  cacheThreadTargetUser(threadId, targetUserId);
-  const key = `${threadId}:${interaction.user.id}`;
-  const img = pendingVerifyImage.get(key);
-  if (!img) {
-    await interaction.followUp({ content: 'Nenhuma imagem em espera. Clique em Verificar e envie uma imagem.', ephemeral: true });
-    return true;
-  }
-  const sexKey = `${threadId}:${targetUserId}`;
-  const selectedSex = pendingVerifySex.get(sexKey);
-  if (!selectedSex) {
-    await interaction.followUp({ content: 'Selecione se o usuário é masculino ou feminino antes de confirmar.', ephemeral: true });
-    return true;
-  }
-  await wait(3000);
-  let roleResult = null;
-  if (cfg?.verifiedRoleId) {
-    try {
-      roleResult = await applyVerifiedRole(
-        interaction.guild,
-        cfg.verifiedRoleId,
-        targetUserId,
-        `Verificação aprovada por ${interaction.user.tag || interaction.user.id}`,
-      );
-    } catch (err) {
-      console.error('[verify] applyVerifiedRole falhou:', err?.message || err);
-      roleResult = { ok: false, error: 'exception' };
-    }
-  }
-  let photoMeta = { url: null, messageId: null, channelId: null };
-  try {
-    const targetChannelId = selectedSex === 'male'
-      ? cfg?.photosMaleChannelId || cfg?.photosChannelId
-      : cfg?.photosFemaleChannelId || cfg?.photosChannelId;
-    if (targetChannelId) {
-      const photosChannel = await interaction.client.channels.fetch(targetChannelId).catch(() => null);
-      if (photosChannel && photosChannel.isTextBased()) {
-        const content = [
-          `Usuario: <@${targetUserId}> | ${targetUserId}`,
-          `Verificado Por: <@${interaction.user.id}> | ${interaction.user.id}`,
-          `Sexo: ${selectedSex === 'male' ? 'Masculino' : 'Feminino'}`,
-        ].join('\n');
-        const file = new AttachmentBuilder(img.buffer, { name: img.name });
-        const sent = await photosChannel.send({ content, files: [file] });
-        const attachment = sent.attachments?.first();
-        photoMeta = {
-          url: attachment?.url || null,
-          messageId: sent.id,
-          channelId: photosChannel.id,
-        };
-      }
-    }
-  } catch {}
-  await prisma.verifiedUserGlobal.upsert({
-    where: { userId: targetUserId },
-    update: {
-      verifiedBy: interaction.user.id,
-      sex: selectedSex,
-      photoUrl: photoMeta.url,
-      photoMessageId: photoMeta.messageId,
-      photoChannelId: photoMeta.channelId,
-      verifiedAt: new Date(),
-    },
-    create: {
-      userId: targetUserId,
-      verifiedBy: interaction.user.id,
-      sex: selectedSex,
-      photoUrl: photoMeta.url,
-      photoMessageId: photoMeta.messageId,
-      photoChannelId: photoMeta.channelId,
-    },
-  });
-  pendingVerifyImage.delete(key);
-  pendingVerifySex.delete(sexKey);
-  try {
-    await interaction.editReply({ content: 'Pré-visualização concluída.', components: [], attachments: [] }).catch(() => {});
-  } catch {}
-  const followUpMessages = [];
-  followUpMessages.push(`Verificação concluída para <@${targetUserId}>.`);
-  if (cfg?.verifiedRoleId) {
-    if (roleResult?.ok) {
-      if (roleResult?.already) {
-        followUpMessages.push('Este usuário já possuía o cargo de verificado.');
-      } else {
-        followUpMessages.push(`Cargo <@&${cfg.verifiedRoleId}> aplicado com sucesso.`);
-      }
-    } else {
-      followUpMessages.push('Não consegui aplicar o cargo automaticamente. Verifique minhas permissões ou reaplique manualmente.');
-    }
-  }
-  await interaction.followUp({ content: followUpMessages.join('\n'), ephemeral: false });
-  return true;
-}
-
-async function handleUpdate(interaction, cfg) {
-  if (!cfg?.mainRoleId || !interaction.member.roles.cache.has(cfg.mainRoleId)) {
-    await interaction.reply({ content: 'Apenas o cargo principal pode atualizar.', ephemeral: true });
-    return true;
-  }
-  const [, , threadId] = interaction.customId.split(':');
-  pendingVerifyImage.delete(`${threadId}:${interaction.user.id}`);
-  await interaction.deferUpdate().catch(() => {});
-  await interaction.followUp({ content: 'Envie outra imagem nesta conversa. Vou substituir a prévia.', ephemeral: true });
-  const thread = interaction.channel || (await interaction.guild.channels.fetch(threadId).catch(() => null));
-  if (!thread) return true;
-  const filter = (m) => m.author.id === interaction.user.id && m.attachments.size > 0;
-  const collector = thread.createMessageCollector({ filter, time: 5 * 60 * 1000, max: 1 });
-  collector.on('collect', async (m) => {
-    try {
-      const att = m.attachments.first();
-      const res = await fetch(att.url);
-      const arr = await res.arrayBuffer();
-      const buf = Buffer.from(arr);
-      pendingVerifyImage.set(`${threadId}:${interaction.user.id}`, { buffer: buf, name: att.name || 'imagem.png' });
-      await m.delete().catch(() => {});
-      const cached = verifyThreads.get(threadId)?.targetUserId || null;
-      const targetUserId = (await resolveThreadTargetUserId(threadId, cached, interaction.guild)) || 'unknown';
-      const sexKey = targetUserId === 'unknown' ? null : `${threadId}:${targetUserId}`;
-      const selectedSex = sexKey ? pendingVerifySex.get(sexKey) || null : null;
-      const components = [
-        buildSexButtons(threadId, targetUserId, selectedSex),
-        buildConfirmRow(threadId, targetUserId, selectedSex),
-      ];
-      const previewContent = buildPreviewMessageContent(targetUserId, interaction.user.id, selectedSex);
-      const attachment = new AttachmentBuilder(buf, { name: att.name || 'imagem.png' });
-      await interaction.editReply({
-        content: previewContent,
-        files: [attachment],
-        components,
-      }).catch(() => {});
-    } catch (e) {
-      await interaction.followUp({ content: 'Falha ao processar a imagem, tente novamente.', ephemeral: true });
-    }
-  });
-  return true;
-}
-
 async function handleClose(interaction, cfg) {
   if (!cfg?.mainRoleId || !interaction.member.roles.cache.has(cfg.mainRoleId)) {
-    await interaction.reply({ content: 'Apenas o cargo principal pode encerrar.', ephemeral: true });
+    await interaction.reply({ content: 'Apenas o InstaMod pode encerrar.', ephemeral: true });
     return true;
   }
   const threadId = interaction.customId.split(':')[2];
-  const tracked = verifyThreads.get(threadId);
-  if (tracked?.targetUserId) {
-    pendingVerifySex.delete(`${threadId}:${tracked.targetUserId}`);
-  }
   const thread = await interaction.guild.channels.fetch(threadId).catch(() => null);
   if (!thread) {
     await interaction.reply({ content: 'Tópico não encontrado.', ephemeral: true });
@@ -570,11 +271,6 @@ async function handleClose(interaction, cfg) {
     await interaction.followUp({ content: 'Falha ao encerrar tópico.', ephemeral: true }).catch(() => {});
   }
   verifyThreads.delete(threadId);
-  for (const key of [...pendingVerifyImage.keys()]) {
-    if (key.startsWith(`${threadId}:`)) {
-      pendingVerifyImage.delete(key);
-    }
-  }
   return true;
 }
 
@@ -667,6 +363,10 @@ module.exports = {
   handleInteraction,
   handleClose,
   verifyThreads,
-  pendingVerifyImage,
-  pendingVerifySex,
+  applyVerifiedRole,
+  removeVerifiedRole,
+  extractUserIdFromThreadName,
+  cacheThreadTargetUser,
+  buildVerifyThreadName,
+  threadBelongsToUser,
 };

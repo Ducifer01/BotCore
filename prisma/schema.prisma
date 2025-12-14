@@ -441,7 +441,7 @@ model GuildConfig {
   guildId            String  @unique
   // Verificação
   verifyPanelChannelId String?
-  mainRoleId         String? // Cargo principal que pode verificar/encerrar
+  mainRoleId         String? // InstaMod que pode verificar/encerrar
   verifiedRoleId     String? // Cargo "Verificado"
   // Cargos para mencionar ao abrir ticket
   ticketPingRoles    TicketPingRole[]

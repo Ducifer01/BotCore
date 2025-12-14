@@ -90,15 +90,17 @@ Notas rápidas:
 - `!verificado <id/menção>` — exibe embed com quem verificou, status atual e foto arquivada (somente cargos autorizados).
 
 ### Verificação de usuários
-- Acesse `/menu` e selecione **Configurar Verificação** para definir cargos, canais e o painel "Verifique-se". O painel único permite ajustar cargos mencionados, canal do painel e publicar/atualizar a mensagem com o botão **Verifique-se**.
 
 Fluxo:
-- Somente o cargo principal pode usar os botões "Verificar" e "Encerrar" dentro do tópico.
-- Ao clicar em "Verificar", o verificador envia uma imagem no tópico; o bot publica uma prévia pública (com botões "Perfeito" e "Atualizar") que é editada em tempo real.
-- Em "Perfeito": o bot aplica automaticamente o cargo de verificado, salva quem verificou, o sexo e a URL da foto no banco e remove a prévia imediatamente.
-- Usuários que já possuem verificação recebem um aviso ao tentar abrir novo ticket, junto ao botão "Cargo Verificado" para reaplicar o cargo caso esteja faltando.
+- O botão do painel continua abrindo um tópico privado com embed "Verificação" e apenas o botão **Encerrar**.
+- Somente o InstaMod pode executar o comando `/verificar usuario:<usuário> sexo:<Masculino/Feminino> imagem:<anexo>` dentro desse tópico para concluir o atendimento.
+- O comando envia automaticamente a imagem para o canal de fotos correspondente (masculino ou feminino), salva o registro no banco e aplica o cargo de verificado.
+- O botão **Encerrar** permanece disponível para fechar o atendimento após o comando.
+- Usuários já verificados recebem aviso ao tentar abrir novo ticket e contam com o botão "Cargo Verificado" para reaplicar o cargo caso esteja faltando.
 - Se o cargo de verificado for adicionado manualmente em alguém não registrado, o bot remove automaticamente.
-- O bot registra automaticamente a contagem de mensagens e o tempo total em chamadas de voz para cada usuário, permitindo que `!info` e `!verificado` exibam métricas atualizadas.
+
+Requisitos mínimos:
+- Sempre que qualquer parte do sistema de Insta é utilizada (botão do painel, `/verificar`, reaplicar cargo etc.), o bot valida se os campos **Insta Boys**, **Insta Girls**, **Fotos Masculino**, **Fotos Feminino**, **InstaMod**, **Cargo Verificado** e **Painel Verifique-se** estão configurados. Caso falte algo, ele responde "Você precisa configurar o ..." indicando o item ausente (os cargos notificados continuam opcionais).
 
 ### Sistema de suporte
 - Acesse `/menu` e escolha **Configurar Suporte** para definir:
