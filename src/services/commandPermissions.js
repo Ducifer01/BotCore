@@ -58,11 +58,31 @@ async function addRolesToCommand(commandName, roleIds, prisma = getPrisma()) {
   if (!normalized || !Array.isArray(roleIds) || !roleIds.length) return { created: 0 };
   const unique = [...new Set(roleIds.map(String))];
   const globalConfigId = await getGlobalConfigId(prisma);
-  await prisma.commandPermissionGlobal.createMany({
-    data: unique.map((roleId) => ({ globalConfigId, commandName: normalized, roleId })),
-    skipDuplicates: true,
+  const existing = await prisma.commandPermissionGlobal.findMany({
+    where: {
+      globalConfigId,
+      commandName: normalized,
+      roleId: { in: unique },
+    },
+    select: { roleId: true },
   });
-  return { created: unique.length };
+  const existingSet = new Set(existing.map((row) => row.roleId));
+  const insertData = unique
+    .filter((roleId) => !existingSet.has(roleId))
+    .map((roleId) => ({ globalConfigId, commandName: normalized, roleId }));
+  if (!insertData.length) {
+    return { created: 0 };
+  }
+  try {
+    await prisma.commandPermissionGlobal.createMany({ data: insertData });
+    return { created: insertData.length };
+  } catch (error) {
+    if (error?.code === 'P2002') {
+      // Outra instância inseriu os mesmos registros simultaneamente; ignora.
+      return { created: 0 };
+    }
+    throw error;
+  }
 }
 
 async function removeRolesFromCommand(commandName, roleIds, prisma = getPrisma()) {

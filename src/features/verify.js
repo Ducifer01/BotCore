@@ -186,8 +186,8 @@ async function openThread(interaction, cfg, prisma) {
       components.push(row);
     }
     const baseMessage = ensuredRole
-      ? 'Você já está verificado e o cargo foi reaplicado automaticamente.'
-      : 'Nosso sistema indica que você já está verificado. Caso precise de ajuda, abra um ticket no canal de suporte.';
+      ? `Ei, eu vi aqui no sistema que você já está verificado. Adicionei o cargo no seu perfil. Caso por algum motivo você ainda esteja sem o cargo, clique no botão abaixo para pegá-lo.`
+      : 'Nosso sistema indica que você já está verificado. Clique no botão abaixo para pegar o cargo verificado, caso esteja faltando.';
     await interaction.reply({
       content: baseMessage,
       components: components.length ? components : undefined,
@@ -303,7 +303,7 @@ async function handleGrantRole(interaction, cfg) {
   }
   if (result?.ok) {
     if (result.already) {
-      await interaction.followUp({ content: 'Você já possuía o cargo de verificado.', ephemeral: true });
+      await interaction.followUp({ content: 'Você já possui o cargo de verificado.', ephemeral: true });
     } else {
       await interaction.followUp({ content: 'Cargo de verificado reaplicado com sucesso.', ephemeral: true });
     }
