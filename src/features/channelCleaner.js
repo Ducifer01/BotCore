@@ -695,6 +695,12 @@ function buildHomeEmbed(panels, status) {
 
 function buildHomeComponents(panels) {
   const rows = [];
+  // Linha de navegação principal: voltar ao menu raiz
+  rows.push(
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('menu:back').setLabel('Voltar').setStyle(ButtonStyle.Secondary),
+    ),
+  );
   if (panels.length) {
     const select = new StringSelectMenuBuilder()
       .setCustomId('menu:cleaner:panel:select')
@@ -747,7 +753,8 @@ function buildPanelEmbed(panel, status) {
 function buildPanelComponents(panel) {
   return [
     new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('menu:cleaner:home:back').setLabel('Voltar').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('menu:back').setLabel('Voltar').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('menu:cleaner:home:back').setLabel('Painéis').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId(`menu:cleaner:panel:${panel.id}:edit-config`)
         .setLabel('Editar nome/tempo')

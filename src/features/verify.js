@@ -16,14 +16,25 @@ function cloneDisabledComponents(rows = []) {
   });
 }
 
-function buildVerifyThreadName(user) {
-  const safeUsername = user.username.replace(/[^\w\- ]/g, '').trim() || 'usuario';
-  return `verif-${user.id}-${safeUsername}`.slice(0, 90);
+function normalizeUsernameForThread(username) {
+  if (!username || typeof username !== 'string') return 'usuario';
+  // Remove acentos e caracteres especiais, permite letras/números/espaços/hífens
+  const withoutDiacritics = username.normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+  const cleaned = withoutDiacritics.replace(/[^a-zA-Z0-9\- ]/g, ' ').trim();
+  // Substitui espaços por hífen, colapsa múltiplos hífens e deixa minúsculo
+  const hyphenated = cleaned.replace(/\s+/g, '-').replace(/-+/g, '-').toLowerCase();
+  return hyphenated || 'usuario';
 }
 
-function threadBelongsToUser(thread, userId) {
-  if (!thread?.name) return false;
-  return thread.name.startsWith(`verif-${userId}`);
+function buildVerifyThreadName(user) {
+  const safeUsername = normalizeUsernameForThread(user.username);
+  return `verifique-${safeUsername}`.slice(0, 90);
+}
+
+function threadBelongsToUser(thread, user) {
+  if (!thread?.name || !user) return false;
+  const safeUsername = normalizeUsernameForThread(user.username);
+  return thread.name.startsWith(`verifique-${safeUsername}`);
 }
 
 function cacheThreadTargetUser(threadId, userId) {
@@ -37,8 +48,11 @@ function cacheThreadTargetUser(threadId, userId) {
 
 function extractUserIdFromThreadName(name) {
   if (!name) return null;
-  const match = /^verif-(\d{5,25})/i.exec(name);
-  return match?.[1] || null;
+  // Suporta formato legado: verif-<userId>-<username>
+  const legacy = /^verif-(\d{5,25})/i.exec(name);
+  if (legacy?.[1]) return legacy[1];
+  // Novo formato não contém ID no nome (verifique-<username>)
+  return null;
 }
 
 async function fetchMemberSafe(guild, userId) {
@@ -200,7 +214,7 @@ async function openThread(interaction, cfg, prisma) {
     let existing = null;
     for (const [, th] of active.threads) {
       const tracked = verifyThreads.get(th.id)?.targetUserId;
-      if (tracked === interaction.user.id || threadBelongsToUser(th, interaction.user.id)) {
+      if (tracked === interaction.user.id || threadBelongsToUser(th, interaction.user)) {
         existing = th;
         break;
       }
@@ -226,7 +240,7 @@ async function openThread(interaction, cfg, prisma) {
     .setTitle('Verificação')
     .setDescription([
       'Aguarde um responsável pela verificação. Use o botão abaixo apenas quando o atendimento estiver concluído.',
-      '⚠️ Somente o cargo InstaMod deve executar o comando `/verificar` dentro deste tópico para finalizar a análise.',
+      'InstaMod, use o comando `/verificar` dentro deste tópico para finalizar a análise.',
     ].join('\n\n'))
     .setColor(0x2ECC71);
   const row = new ActionRowBuilder().addComponents(

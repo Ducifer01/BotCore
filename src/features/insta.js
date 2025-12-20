@@ -193,6 +193,20 @@ async function showResetConfirm(interaction) {
   return true;
 }
 
+function disableComponents(rows = []) {
+  return rows.map((row) => {
+    const r = new ActionRowBuilder();
+    for (const comp of row.components || []) {
+      try {
+        r.addComponents(ButtonBuilder.from(comp).setDisabled(true));
+      } catch {
+        // Ignora componentes não botões
+      }
+    }
+    return r;
+  });
+}
+
 function buildInstaEmbed(cfg, status) {
   const lines = [
     `• Insta Boys: ${cfg?.instaBoysChannelId ? `<#${cfg.instaBoysChannelId}>` : 'não definido'}`,
@@ -202,7 +216,7 @@ function buildInstaEmbed(cfg, status) {
     `• InstaMod: ${cfg?.mainRoleId ? `<@&${cfg.mainRoleId}>` : 'não definido'}`,
     `• Cargo Verificado: ${cfg?.verifiedRoleId ? `<@&${cfg.verifiedRoleId}>` : 'não definido'}`,
     `• Painel Verifique-se: ${cfg?.verifyPanelChannelId ? `<#${cfg.verifyPanelChannelId}>` : 'não definido'}`,
-    `• Cargos Notificados: ${cfg?.ticketPingRolesGlobal?.length ? cfg.ticketPingRolesGlobal.map((r) => `<@&${r.roleId}>`).join(', ') : 'nenhum definido'}`,
+    `• Notificar Cargos: ${cfg?.ticketPingRolesGlobal?.length ? cfg.ticketPingRolesGlobal.map((r) => `<@&${r.roleId}>`).join(', ') : 'nenhum definido'}`,
   ].join('\n');
   const prefix = status ? `${getStatusEmoji(status.type)} ${status.message}\n\n` : '';
   return new EmbedBuilder()
@@ -222,7 +236,7 @@ function buildInstaMenuRows() {
   const row2 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('menu:insta:mainrole').setLabel('InstaMod').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('menu:insta:verifiedrole').setLabel('Cargo Verificado').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('menu:insta:pings').setLabel('Cargos Notificados').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('menu:insta:pings').setLabel('Notificar Cargos').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('menu:insta:verifypanel').setLabel('Painel Verifique-se').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('menu:insta:unverify').setLabel('Cancelar Verificação').setStyle(ButtonStyle.Danger),
   );
@@ -275,15 +289,27 @@ async function handleInteraction(interaction, ctx) {
   return false;
 }
 
+const { checkAccess } = require('../permissions');
+
 async function handleConfigButtons(interaction, ctx) {
   await ensureDeferred(interaction);
-  if (!(await ensurePosse(interaction, ctx))) {
-    return true;
-  }
   const prisma = ctx.getPrisma();
   const parts = interaction.customId.split(':');
   const action = parts[2];
   const subaction = parts[3];
+
+  // Para ação de reset, permitir também quem possui permissão via "Permissões de Comandos" (comando /resetar)
+  if (action === 'reset') {
+    const allowedViaCommand = await checkAccess(interaction, 'resetar').catch(() => false);
+    const isPosse = await ensurePosse(interaction, ctx);
+    if (!allowedViaCommand && !isPosse) {
+      return true;
+    }
+  } else {
+    if (!(await ensurePosse(interaction, ctx))) {
+      return true;
+    }
+  }
 
   if (action === 'home') {
     return renderHome(interaction, prisma);
@@ -327,7 +353,7 @@ async function handleConfigButtons(interaction, ctx) {
   }
   if (action === 'pings') {
     return showRolePrompt(interaction, {
-      title: 'Cargos Notificados',
+      title: 'Notificar Cargos',
       description: 'Selecione até 10 cargos que serão mencionados quando um usuário abrir o ticket de verificação.',
       customId: 'menu:insta:select:pings',
       min: 0,
@@ -354,11 +380,12 @@ async function handleConfigButtons(interaction, ctx) {
     }
     if (subaction === 'confirm') {
       const ownerId = parts[4];
+      const origin = parts[5] || 'panel';
       if (ownerId && ownerId !== interaction.user.id) {
         await interaction.followUp({ content: 'Apenas quem solicitou pode confirmar.', ephemeral: true }).catch(() => {});
         return true;
       }
-      return performInstaReset(interaction, prisma);
+      return performInstaReset(interaction, prisma, { mode: origin === 'sc' ? 'slash' : 'panel' });
     }
     return showResetConfirm(interaction);
   }
@@ -511,11 +538,17 @@ async function publishVerificationPanel(channel) {
   }
 }
 
-async function performInstaReset(interaction, prisma) {
+async function performInstaReset(interaction, prisma, opts = {}) {
   await ensureDeferred(interaction);
   const cfg = await getGlobalConfig(prisma);
   const channelIds = [cfg?.instaBoysChannelId, cfg?.instaGirlsChannelId].filter(Boolean);
   if (!channelIds.length) {
+    if (opts.mode === 'slash') {
+      await interaction.followUp({ content: 'Configure os canais de Insta antes de resetar.', ephemeral: true }).catch(() => {});
+      const disabled = disableComponents(interaction.message?.components || []);
+      await interaction.editReply({ components: disabled }).catch(() => {});
+      return true;
+    }
     return renderHome(interaction, prisma, { type: 'error', message: 'Configure os canais de Insta antes de resetar.' });
   }
 
@@ -569,6 +602,12 @@ async function performInstaReset(interaction, prisma) {
   }
 
   const message = summaries.length ? summaries.join(' ') : 'Reset concluído.';
+  if (opts.mode === 'slash') {
+    await interaction.followUp({ content: message, ephemeral: true }).catch(() => {});
+    const disabled = disableComponents(interaction.message?.components || []);
+    await interaction.editReply({ components: disabled }).catch(() => {});
+    return true;
+  }
   return renderHome(interaction, prisma, { type: 'success', message });
 }
 
