@@ -3,7 +3,7 @@ const { checkAccess } = require('../permissions');
 
 module.exports = {
   data: new SlashCommandBuilder()
-    .setName('resetar')
+    .setName('resetar_insta')
     .setDescription('Executar ações de reset')
     .addSubcommand((sub) => sub
       .setName('insta')
