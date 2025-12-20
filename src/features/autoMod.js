@@ -328,7 +328,7 @@ function moduleOverviewComponents(selected = null) {
     ]);
   return [
     new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('menu:back').setLabel('Menu principal').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('menu:back').setLabel('Voltar').setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder().addComponents(select),
   ];
