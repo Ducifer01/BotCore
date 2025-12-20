@@ -18,6 +18,7 @@ const bulkRoleFeature = require('./features/bulkRole');
 const syncFeature = require('./features/categorySync');
 const autoModFeature = require('./features/autoMod');
 const moderationConfig = require('./features/moderationConfig');
+const auditConfig = require('./features/auditConfig');
 const commandPermissionsFeature = require('./features/commandPermissions');
 const moderationCommands = require('./features/moderationCommands');
 const muteCommands = require('./features/muteCommands');
@@ -77,6 +78,7 @@ const menuHandler = createMenuHandler({
   invites: { presentMenu: inviteTrackerFeature.presentMenu },
   cleaner: { presentMenu: channelCleanerFeature.presentMenu },
   permissions: { presentMenu: commandPermissionsFeature.presentMenu },
+  audit: { presentMenu: auditConfig.presentMenu },
 });
 
 const interactionFeatures = [
@@ -92,6 +94,7 @@ const interactionFeatures = [
   autoModFeature,
   commandPermissionsFeature,
   moderationConfig,
+  auditConfig,
   inviteTrackerFeature,
   channelCleanerFeature,
   { handleInteraction: handleSupportInteraction },

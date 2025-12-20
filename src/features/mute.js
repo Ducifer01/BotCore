@@ -2,6 +2,7 @@ const { getPrisma } = require('../db');
 const { isGuildAllowed } = require('../config');
 const { buildMuteExpirationEmbed } = require('../lib/mute');
 const { sendLogMessage } = require('../lib/moderation');
+const { EmbedBuilder, AuditLogEvent, PermissionFlagsBits } = require('discord.js');
 
 const CHECK_INTERVAL_MS = 15000;
 const RELEASE_DELAY_MS = 2000;
@@ -28,6 +29,7 @@ async function handleVoiceStateUpdate(oldState, newState) {
   const prisma = getPrisma();
   const cfg = await prisma.globalConfig.findFirst();
   if (!cfg) return;
+  const muteChanged = Boolean((oldState?.serverMute ?? false) !== (newState?.serverMute ?? false));
   const activeMute = await prisma.voiceMute.findFirst({ where: { guildId: guild.id, userId: member.id, endedAt: null } });
   const unlockChannelId = cfg.muteVoiceUnlockChannelId;
   const joinedUnlockChannel = Boolean(
@@ -46,6 +48,12 @@ async function handleVoiceStateUpdate(oldState, newState) {
     return;
   }
 
+  // Log de mute/desmute manual (no dedo) quando não há registro de mute ativo
+  if (muteChanged && cfg?.auditManualMuteLogChannelId) {
+    const muted = Boolean(newState?.serverMute);
+    await logManualVoiceMuteChange(guild, member, muted, cfg).catch(() => {});
+  }
+
   if (joinedUnlockChannel) {
     if (newState.serverMute) {
       await newState.setMute(false, 'Canal de desbloqueio - mute manual liberado').catch(() => {});
@@ -54,6 +62,53 @@ async function handleVoiceStateUpdate(oldState, newState) {
       await member.roles.remove(cfg.muteVoiceRoleId, 'Canal de desbloqueio - removendo cargo de mute voz').catch(() => {});
     }
   }
+}
+
+async function logManualVoiceMuteChange(guild, member, muted, cfg) {
+  let actor = null;
+  try {
+    // Checar se o bot tem permissão para ver Audit Logs
+    const me = guild.members?.me;
+    if (!me || !me.permissions?.has(PermissionFlagsBits.ViewAuditLog)) {
+      actor = null;
+    } else {
+      // Buscar mais entradas e ampliar janela temporal (30s)
+      const logs = await guild.fetchAuditLogs({ type: AuditLogEvent.MemberUpdate, limit: 20 }).catch(() => null);
+      const entries = logs?.entries ? [...logs.entries.values()] : [];
+      const now = Date.now();
+      const recent = entries.find((entry) => {
+        if (!entry || !entry.target || String(entry.target.id) !== String(member.id)) return false;
+        const created = entry.createdTimestamp || 0;
+        if (Math.abs(now - created) > 30000) return false;
+        const changes = entry.changes || [];
+        // verificar mudança relevante
+        const relevant = changes.some((c) => {
+          if (!c || !c.key) return false;
+          // chaves possíveis reportadas pelo Discord para alterações de membro: 'mute', (algumas variantes no passado: 'deaf')
+          if (c.key === 'mute') {
+            // aceitar quando novo estado coincide com 'muted' ou transição esperada
+            return (c.new === muted) || (c.old === !muted);
+          }
+          return false;
+        });
+        return Boolean(relevant);
+      });
+      actor = recent?.executor || null;
+    }
+  } catch (e) {
+    actor = null;
+  }
+
+  const embed = new EmbedBuilder()
+    .setTitle(muted ? 'Mute no dedo' : 'Desmute no dedo')
+    .addFields(
+      { name: 'membro:', value: `<@${member.id}>\nID: \`${member.id}\``, inline: true },
+      { name: 'Moderador:', value: actor ? `<@${actor.id}>\nID: \`${actor.id}\`` : 'Desconhecido\nID: `N/A`', inline: true },
+    )
+    .setColor('#ff6600')
+    .setTimestamp();
+
+  await sendLogMessage(guild, cfg.auditManualMuteLogChannelId, embed);
 }
 
 async function handleGuildMemberUpdate(oldMember, newMember) {

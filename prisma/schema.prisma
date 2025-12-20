@@ -32,6 +32,8 @@ model GlobalConfig {
   supportPanelChannelId String?
   supportLogChannelId   String?
   supportRolesGlobal    SupportRoleGlobal[]
+  // Auditoria
+  auditManualMuteLogChannelId String?
   // Relacionamentos globais
   ticketPingRolesGlobal TicketPingRoleGlobal[]
   // AutoMod
