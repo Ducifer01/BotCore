@@ -199,7 +199,7 @@ async function closeTicket(interaction, threadId, { allowAuthor = false } = {}) 
     const logChannel = await interaction.client.channels.fetch(cfg.supportLogChannelId).catch(() => null);
     if (logChannel && logChannel.isTextBased()) {
       const logEmbed = new EmbedBuilder()
-        .setTitle(':Planilha: | Ticket suporte')
+        .setTitle('LOG | Ticket suporte')
         .setDescription(`Quem abriu: <@${ticket.openerId}>\nQuem fechou: <@${interaction.user.id}>`)
         .setColor(0xED4245)
         .setFooter({ text: 'Horário do encerramento' })
