@@ -68,7 +68,7 @@ const COMMAND_MAP = {
 async function handleMutecall({ message, args, prisma, cfg, posseId }) {
   await assertPermission(message.member, cfg, MUTE_COMMANDS.MUTE_CALL, posseId);
   if (!cfg.muteVoiceRoleId) {
-    throw new CommandUsageError('Configure o cargo mutado voz no /menu antes de usar !mutecall.');
+    throw new CommandUsageError('Nenhum cargo de voz configurado. Por favor, contate o posse.');
   }
   if (args.length < 2) {
     throw new CommandUsageError('Uso: !mutecall @usuario 10m Motivo.');

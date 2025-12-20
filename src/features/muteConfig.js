@@ -30,11 +30,13 @@ function formatChannel(channelId) {
   return channelId ? `<#${channelId}>` : 'não configurado';
 }
 
-function formatPerms(cfg, commandType) {
+function formatPerms(cfg, commandTypes) {
+  const types = Array.isArray(commandTypes) ? commandTypes : [commandTypes];
   const roles = (cfg?.mutePermissions || [])
-    .filter((perm) => perm.commandType === commandType)
+    .filter((perm) => types.includes(perm.commandType))
     .map((perm) => `<@&${perm.roleId}>`);
-  return roles.length ? roles.join(', ') : 'Somente posse/Admin/MuteMembers';
+  const unique = [...new Set(roles)];
+  return unique.length ? unique.join(', ') : 'Somente posse/Admin/MuteMembers';
 }
 
 function buildSummaryEmbed(cfg) {
@@ -62,8 +64,11 @@ function buildVoiceEmbed(cfg) {
       { name: 'Cargo mutado voz', value: formatRole(cfg?.muteVoiceRoleId), inline: true },
       { name: 'Canal desbloqueio', value: formatChannel(cfg?.muteVoiceUnlockChannelId), inline: true },
       { name: 'Canal de log', value: formatChannel(cfg?.muteVoiceLogChannelId), inline: true },
-      { name: 'Permissões !mutecall', value: formatPerms(cfg, MUTE_COMMANDS.MUTE_CALL), inline: false },
-      { name: 'Permissões !unmutecall', value: formatPerms(cfg, MUTE_COMMANDS.UNMUTE_CALL), inline: false },
+      {
+        name: 'Permissões Mutecall',
+        value: formatPerms(cfg, [MUTE_COMMANDS.MUTE_CALL, MUTE_COMMANDS.UNMUTE_CALL]),
+        inline: false,
+      },
     )
     .setColor(0x5865f2);
 }
@@ -75,8 +80,11 @@ function buildChatEmbed(cfg) {
     .addFields(
       { name: 'Cargo mutado chat', value: formatRole(cfg?.muteChatRoleId), inline: true },
       { name: 'Canal de log', value: formatChannel(cfg?.muteChatLogChannelId), inline: true },
-      { name: 'Permissões !mute', value: formatPerms(cfg, MUTE_COMMANDS.MUTE_CHAT), inline: false },
-      { name: 'Permissões !unmute', value: formatPerms(cfg, MUTE_COMMANDS.UNMUTE_CHAT), inline: false },
+      {
+        name: 'Permissões Mute',
+        value: formatPerms(cfg, [MUTE_COMMANDS.MUTE_CHAT, MUTE_COMMANDS.UNMUTE_CHAT]),
+        inline: false,
+      },
     )
     .setColor(0x57f287);
 }
@@ -102,8 +110,7 @@ function voiceComponents() {
       new ButtonBuilder().setCustomId('menu:mute:voice:log').setLabel('Log voz').setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('menu:mute:voice:perm:mutecall').setLabel('Permissões !mutecall').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('menu:mute:voice:perm:unmutecall').setLabel('Permissões !unmutecall').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('menu:mute:voice:perm:mutecall').setLabel('Permissões Mutecall').setStyle(ButtonStyle.Primary),
     ),
   ];
 }
@@ -116,8 +123,7 @@ function chatComponents() {
       new ButtonBuilder().setCustomId('menu:mute:chat:log').setLabel('Log chat').setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('menu:mute:chat:perm:mute').setLabel('Permissões !mute').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('menu:mute:chat:perm:unmute').setLabel('Permissões !unmute').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('menu:mute:chat:perm:mute').setLabel('Permissões Mute').setStyle(ButtonStyle.Success),
     ),
   ];
 }
@@ -194,22 +200,19 @@ async function handleButton(interaction, prisma) {
     return true;
   }
 
-  if (id.startsWith('menu:mute:voice:perm:')) {
-    const action = id.split(':').pop();
-    const commandType = action === 'mutecall' ? MUTE_COMMANDS.MUTE_CALL : MUTE_COMMANDS.UNMUTE_CALL;
-    return showPermissionSelector(interaction, prisma, commandType);
+  if (id === 'menu:mute:voice:perm:mutecall') {
+    return showPermissionSelector(interaction, prisma, MUTE_COMMANDS.MUTE_CALL);
   }
 
-  if (id.startsWith('menu:mute:chat:perm:')) {
-    const action = id.split(':').pop();
-    const commandType = action === 'mute' ? MUTE_COMMANDS.MUTE_CHAT : MUTE_COMMANDS.UNMUTE_CHAT;
-    return showPermissionSelector(interaction, prisma, commandType);
+  if (id === 'menu:mute:chat:perm:mute') {
+    return showPermissionSelector(interaction, prisma, MUTE_COMMANDS.MUTE_CHAT);
   }
 
   if (id.startsWith('menu:mute:perm:') && id.endsWith(':clear')) {
     const commandType = id.split(':')[3];
+    const targets = getLinkedCommandTypes(commandType);
     const cfg = await fetchConfig(prisma);
-    await prisma.mutePermission.deleteMany({ where: { globalConfigId: cfg.id, commandType } });
+    await prisma.mutePermission.deleteMany({ where: { globalConfigId: cfg.id, commandType: { in: targets } } });
     await renderView(interaction, prisma, resolveViewFromCommand(commandType));
     await safeReply(interaction, { content: 'Permissões limpas. Apenas posse/Admin poderão usar.', ephemeral: true });
     return true;
@@ -265,12 +268,16 @@ async function handleSelect(interaction, prisma) {
 
   if (id.startsWith('menu:mute:perm:') && id.endsWith(':set')) {
     const commandType = id.split(':')[3];
+    const targets = getLinkedCommandTypes(commandType);
     const selected = interaction.values || [];
-    await prisma.mutePermission.deleteMany({ where: { globalConfigId: cfg.id, commandType } });
+    await prisma.mutePermission.deleteMany({ where: { globalConfigId: cfg.id, commandType: { in: targets } } });
     if (selected.length) {
-      await prisma.mutePermission.createMany({
-        data: selected.slice(0, 25).map((roleId) => ({ globalConfigId: cfg.id, commandType, roleId })),
-      });
+      const data = selected.slice(0, 25);
+      for (const target of targets) {
+        await prisma.mutePermission.createMany({
+          data: data.map((roleId) => ({ globalConfigId: cfg.id, commandType: target, roleId })),
+        });
+      }
     }
     await renderView(interaction, prisma, resolveViewFromCommand(commandType));
     await safeReply(interaction, { content: 'Permissões atualizadas.', ephemeral: true });
@@ -407,21 +414,23 @@ async function showLogSelector(interaction, prisma, view) {
 
 async function showPermissionSelector(interaction, prisma, commandType) {
   const cfg = await fetchConfig(prisma);
+  const targets = getLinkedCommandTypes(commandType);
   const selected = (cfg?.mutePermissions || [])
-    .filter((perm) => perm.commandType === commandType)
+    .filter((perm) => targets.includes(perm.commandType))
     .map((perm) => perm.roleId);
+  const uniqueSelected = [...new Set(selected)];
   const select = new RoleSelectMenuBuilder()
     .setCustomId(`menu:mute:perm:${commandType}:set`)
     .setPlaceholder('Selecione os cargos autorizados')
     .setMinValues(1)
     .setMaxValues(25);
-  if (selected.length) {
-    select.setDefaultRoles(...selected.slice(0, 25));
+  if (uniqueSelected.length) {
+    select.setDefaultRoles(...uniqueSelected.slice(0, 25));
   }
   const embed = new EmbedBuilder()
     .setTitle('Permissões do comando')
     .setDescription('Escolha quais cargos podem usar este comando. Use "Limpar" para voltar ao padrão (posse/Admin).')
-    .addFields({ name: 'Comando', value: describeCommandType(commandType) })
+    .addFields({ name: 'Comando', value: describeCommandLabel(commandType) })
     .setColor(resolveViewFromCommand(commandType) === VOICE_VIEW ? 0x5865f2 : 0x57f287);
   await interaction.update({
     embeds: [embed],
@@ -442,7 +451,23 @@ async function showPermissionSelector(interaction, prisma, commandType) {
   return true;
 }
 
-function describeCommandType(commandType) {
+function describeCommandLabel(commandType) {
+  const linked = getLinkedCommandTypes(commandType);
+  const unique = [...new Set(linked)];
+  const hasVoice =
+    unique.includes(MUTE_COMMANDS.MUTE_CALL) && unique.includes(MUTE_COMMANDS.UNMUTE_CALL);
+  const hasChat =
+    unique.includes(MUTE_COMMANDS.MUTE_CHAT) && unique.includes(MUTE_COMMANDS.UNMUTE_CHAT);
+  if (hasVoice) {
+    return '!mutecall / !unmutecall (mute voz)';
+  }
+  if (hasChat) {
+    return '!mute / !unmute (mute chat)';
+  }
+  return describeSingleCommand(commandType);
+}
+
+function describeSingleCommand(commandType) {
   switch (commandType) {
     case MUTE_COMMANDS.MUTE_CALL:
       return '!mutecall (aplicar mute voz)';
@@ -455,6 +480,22 @@ function describeCommandType(commandType) {
     default:
       return 'Comando desconhecido';
   }
+}
+
+function getLinkedCommandTypes(commandType) {
+  if (
+    commandType === MUTE_COMMANDS.MUTE_CALL ||
+    commandType === MUTE_COMMANDS.UNMUTE_CALL
+  ) {
+    return [MUTE_COMMANDS.MUTE_CALL, MUTE_COMMANDS.UNMUTE_CALL];
+  }
+  if (
+    commandType === MUTE_COMMANDS.MUTE_CHAT ||
+    commandType === MUTE_COMMANDS.UNMUTE_CHAT
+  ) {
+    return [MUTE_COMMANDS.MUTE_CHAT, MUTE_COMMANDS.UNMUTE_CHAT];
+  }
+  return [commandType];
 }
 
 function resolveViewFromCommand(commandType) {
