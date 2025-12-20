@@ -72,6 +72,7 @@ Notas rápidas:
 - Apenas cargos listados (e o usuário posse configurado via `POSSE_USER_ID`) conseguem executar o comando correspondente; permissões administrativas do Discord não concedem acesso automático.
 - Enquanto nenhum cargo estiver associado a um comando, somente o usuário posse poderá executá-lo. Configure ao menos um cargo para liberar o uso.
 - As escolhas são armazenadas em `CommandPermissionGlobal` (ligado ao `GlobalConfig`). O painel mostra o resumo atual e permite adicionar/remover cargos a partir de selects nativos.
+- Além dos slash commands, o painel agora inclui os prefix commands `!verificado` e `!remover_verificado`. Já o `!info` permanece liberado para todos os usuários e não aparece na lista.
 
 ## Comandos
 - `/copiar_perm_categoria origem:<categoria> destino:<categoria>` — copia overwrites de uma categoria para outra.

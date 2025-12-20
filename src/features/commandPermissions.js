@@ -21,10 +21,23 @@ const CUSTOM_IDS = {
   OVERVIEW: 'commandperms:overview',
 };
 
+const STATIC_MANAGED_COMMANDS = [
+  {
+    key: 'verificado',
+    label: '!verificado',
+    description: 'Mostra status de verificação do usuário informado.',
+  },
+  {
+    key: 'remover_verificado',
+    label: '!remover_verificado',
+    description: 'Inicia o fluxo para remover a verificação de alguém.',
+  },
+];
+
 function getManagedCommands(ctx) {
   const listFn = ctx?.listRegisteredCommands;
   const commands = typeof listFn === 'function' ? listFn() : [];
-  return commands
+  const slashCommands = commands
     .filter((cmd) => isCommandManaged(cmd.name))
     .map((cmd) => ({
       key: normalizeCommandName(cmd.name),
@@ -33,6 +46,18 @@ function getManagedCommands(ctx) {
       rawName: cmd.name,
     }))
     .sort((a, b) => a.key.localeCompare(b.key));
+
+  const extras = STATIC_MANAGED_COMMANDS
+    .filter((entry) => isCommandManaged(entry.key))
+    .map((entry) => ({ ...entry }));
+
+  const merged = [...slashCommands];
+  for (const extra of extras) {
+    if (!merged.some((cmd) => cmd.key === extra.key)) {
+      merged.push(extra);
+    }
+  }
+  return merged.sort((a, b) => a.key.localeCompare(b.key));
 }
 
 function formatRoleMentions(roleIds = [], guild) {
