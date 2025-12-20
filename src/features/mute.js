@@ -99,6 +99,14 @@ async function logManualVoiceMuteChange(guild, member, muted, cfg) {
     actor = null;
   }
 
+  // Ignorar DESMUTE no dedo feito pelo próprio bot (mas logar outros bots/usuários)
+  try {
+    const meId = guild.members?.me?.id;
+    if (!muted && actor && meId && String(actor.id) === String(meId)) {
+      return; // não enviar embed
+    }
+  } catch {}
+
   const embed = new EmbedBuilder()
     .setTitle(muted ? 'Mute no dedo' : 'Desmute no dedo')
     .addFields(

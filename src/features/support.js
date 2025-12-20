@@ -33,7 +33,7 @@ function getSupportPanelPayload() {
 
 function buildTicketThreadEmbed() {
   return new EmbedBuilder()
-    .setTitle('Insônia Suporte')
+    .setTitle('Ticket | Suporte')
     .setDescription('Em breve nossa equipe de suporte irá te ajudar. Você pode adiantar explicando o caso abaixo e já adiantando provas. OBS: Nossas punições são baseadas em provas, e nem sempre testemunhas bastam.')
     .setColor(SUPPORT_EMBED_COLOR);
 }
