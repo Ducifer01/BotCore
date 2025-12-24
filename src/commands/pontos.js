@@ -1,6 +1,13 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { getPrisma } = require('../db');
-const { getPointsConfig, ensurePointsConfig, ensureBalance, toBigInt, userEligible } = require('../services/points');
+const {
+  getPointsConfig,
+  ensurePointsConfig,
+  ensureBalance,
+  toBigInt,
+  userEligible,
+  isVoiceChannelAllowed,
+} = require('../services/points');
 
 function formatSeconds(total) {
   const sec = Math.max(0, Math.trunc(total || 0));
@@ -28,6 +35,23 @@ module.exports = {
       const voice = member?.voice;
       const channel = voice?.channel || null;
       if (channel) {
+        const hasVoiceFilters = (cfg.voiceChannels?.length || cfg.voiceCategories?.length);
+        const allowedVoice = isVoiceChannelAllowed(cfg, channel);
+        if (hasVoiceFilters && !allowedVoice) {
+          callInfo = [
+            `Canal: ${channel.name}`,
+            'Status: Não elegível (este canal/categoria não pontua)',
+            'Próximo ganho: —',
+          ].join('\n');
+          const embed = new EmbedBuilder()
+            .setTitle('Seus pontos')
+            .setColor(0x00b0f4)
+            .setDescription(`${targetUser.id === interaction.user.id ? 'Você tem' : `${targetUser} tem`} **${pts}** pontos.`)
+            .addFields({ name: 'Call', value: callInfo })
+            .setTimestamp(new Date());
+          await interaction.reply({ embeds: [embed], ephemeral: true });
+          return;
+        }
         const muted = voice.selfMute || voice.serverMute;
         const deaf = voice.selfDeaf || voice.serverDeaf;
         const minUsers = cfg.minUserCall || 0;

@@ -41,6 +41,8 @@ async function getPointsConfig(prisma = getPrisma()) {
       ignoredRoles: true,
       ignoredUsers: true,
       chatChannels: true,
+      voiceChannels: true,
+      voiceCategories: true,
       leaderboardPanels: true,
     },
   });
@@ -92,6 +94,16 @@ async function ensureBalance(prisma, cfg, guildId, userId) {
     include: { chatActivity: true, voiceSession: true },
   });
   return balance;
+}
+
+function isVoiceChannelAllowed(cfg, channel) {
+  if (!channel) return false;
+  const allowedChannels = cfg?.voiceChannels?.map((c) => c.channelId) || [];
+  const allowedCategories = cfg?.voiceCategories?.map((c) => c.categoryId) || [];
+  if (!allowedChannels.length && !allowedCategories.length) return true; // tudo liberado
+  if (allowedChannels.includes(channel.id)) return true;
+  if (allowedCategories.length && channel.parentId && allowedCategories.includes(channel.parentId)) return true;
+  return false;
 }
 
 function buildLogEmbed({ title, description }) {
@@ -298,8 +310,11 @@ async function tickVoice({ client, prisma, cfg }) {
   const globalConfigId = cfg.globalConfigId || cfg.id;
   const guilds = client.guilds.cache;
   for (const guild of guilds.values()) {
-    const voiceChannels = guild.channels.cache.filter((ch) => ch.type === ChannelType.GuildVoice);
+    const voiceChannels = guild.channels.cache.filter(
+      (ch) => ch.type === ChannelType.GuildVoice || ch.type === ChannelType.GuildStageVoice,
+    );
     for (const channel of voiceChannels.values()) {
+      if (!isVoiceChannelAllowed(cfg, channel)) continue;
       const members = [...channel.members.values()].filter((m) => !m.user.bot);
       if (!members.length) continue;
       const activeMembers = members.filter((m) => {
@@ -516,4 +531,5 @@ module.exports = {
   sendLog,
   userEligible,
   toBigInt,
+  isVoiceChannelAllowed,
 };

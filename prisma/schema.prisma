@@ -101,6 +101,8 @@ model PointsConfig {
   ignoredRoles               PointsIgnoredRole[]
   ignoredUsers               PointsIgnoredUser[]
   chatChannels               PointsChatChannel[]
+  voiceChannels              PointsVoiceChannel[]
+  voiceCategories            PointsVoiceCategory[]
   leaderboardPanels          PointsLeaderboardPanel[]
 }
 
@@ -139,6 +141,28 @@ model PointsChatChannel {
   config         PointsConfig @relation(fields: [pointsConfigId], references: [id], onDelete: Cascade)
 
   @@unique([pointsConfigId, channelId])
+  @@index([guildId])
+}
+
+model PointsVoiceChannel {
+  id             Int          @id @default(autoincrement())
+  pointsConfigId Int
+  channelId      String
+  guildId        String
+  config         PointsConfig @relation(fields: [pointsConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([pointsConfigId, channelId])
+  @@index([guildId])
+}
+
+model PointsVoiceCategory {
+  id             Int          @id @default(autoincrement())
+  pointsConfigId Int
+  categoryId     String
+  guildId        String
+  config         PointsConfig @relation(fields: [pointsConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([pointsConfigId, categoryId])
   @@index([guildId])
 }
 

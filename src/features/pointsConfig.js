@@ -21,10 +21,11 @@ function buildEmbed(cfg) {
     .setDescription([
       `Status: **${cfg?.enabled ? 'Ativado' : 'Desativado'}** (${cfg?.mode || 'GLOBAL'})`,
       `Chat: +${cfg?.pontosChat || 0} | Cooldown: ${cfg?.cooldownChatMinutes || 0} min | Limite diário: ${cfg?.limitDailyChat ?? 'desligado'}`,
-      `Call: +${cfg?.pontosCall || 0} a cada ${cfg?.tempoCallMinutes || 0} min | min usuários: ${cfg?.minUserCall || 0}`,
+  `Call: +${cfg?.pontosCall || 0} a cada ${cfg?.tempoCallMinutes || 0} min | min usuários: ${cfg?.minUserCall || 0}`,
       `Convites: +${cfg?.pontosConvites || 0} | dias convocação: ${cfg?.diasConvite || 0} | tempo servidor: ${cfg?.tempoServerHours || 0}h | idade conta: ${cfg?.idadeContaDias || 0}d`,
       `Chars chat min: ${cfg?.qtdCaracteresMin || 0}`,
-      `Canais chat: ${cfg?.chatChannels?.length || 0}`,
+  `Canais chat: ${cfg?.chatChannels?.length || 0}`,
+  `Canais voz: ${cfg?.voiceChannels?.length || 0} | Categorias voz: ${cfg?.voiceCategories?.length || 0}`,
       `Roles participante: ${cfg?.participantRoles?.length || 0}`,
       `Roles ignorados: ${cfg?.ignoredRoles?.length || 0} | Usuários ignorados: ${cfg?.ignoredUsers?.length || 0}`,
       `Logs admin: ${cfg?.logsAdminChannelId ? `<#${cfg.logsAdminChannelId}>` : 'nenhum'} | Logs usuários: ${cfg?.logsUsuariosChannelId ? `<#${cfg.logsUsuariosChannelId}>` : 'nenhum'}`,
@@ -58,6 +59,8 @@ function buildHomeComponents(cfg) {
       new ButtonBuilder().setCustomId('menu:points:logs').setLabel('Canais de log').setStyle(ButtonStyle.Primary),
     ),
     new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('menu:points:voicecategories').setLabel('Categorias de voz').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('menu:points:voicechannels').setLabel('Canais de voz').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('menu:points:rules').setLabel('Enviar Regras').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('menu:back').setLabel('Voltar').setStyle(ButtonStyle.Secondary),
     ),
@@ -105,6 +108,12 @@ async function handleInteraction(interaction, ctx) {
   if (interaction.isButton() && interaction.customId === 'menu:points:rules') {
     return promptRulesChannel(interaction, ctx);
   }
+  if (interaction.isButton() && interaction.customId === 'menu:points:voicechannels') {
+    return promptVoiceChannels(interaction, ctx);
+  }
+  if (interaction.isButton() && interaction.customId === 'menu:points:voicecategories') {
+    return promptVoiceCategories(interaction, ctx);
+  }
   if (interaction.isButton() && interaction.customId === 'menu:points:leaderboard') {
     return promptLeaderboard(interaction, ctx);
   }
@@ -128,6 +137,12 @@ async function handleInteraction(interaction, ctx) {
   }
   if (interaction.isChannelSelectMenu() && interaction.customId === 'menu:points:rules:channel') {
     return sendRules(interaction, ctx);
+  }
+  if (interaction.isChannelSelectMenu() && interaction.customId === 'menu:points:voicechannels:set') {
+    return saveVoiceChannels(interaction, ctx);
+  }
+  if (interaction.isChannelSelectMenu() && interaction.customId === 'menu:points:voicecategories:set') {
+    return saveVoiceCategories(interaction, ctx);
   }
   if (interaction.isRoleSelectMenu()) {
     if (interaction.customId === 'menu:points:roles:set') return saveRoles(interaction, ctx, 'participant');
@@ -294,6 +309,40 @@ async function promptChannels(interaction, ctx) {
   return true;
 }
 
+async function promptVoiceChannels(interaction, ctx) {
+  await interaction.deferUpdate().catch(() => {});
+  const prisma = ctx.getPrisma();
+  const cfg = await pointsService.getPointsConfig(prisma);
+  const select = new ChannelSelectMenuBuilder()
+    .setCustomId('menu:points:voicechannels:set')
+    .setPlaceholder('Selecione canais de voz permitidos')
+    .setMinValues(0)
+    .setMaxValues(25)
+    .addChannelTypes(ChannelType.GuildVoice, ChannelType.GuildStageVoice);
+  if (cfg?.voiceChannels?.length) {
+    select.setDefaultChannels(...cfg.voiceChannels.map((c) => c.channelId).slice(0, 25));
+  }
+  await interaction.editReply({ embeds: [buildEmbed(cfg)], components: [new ActionRowBuilder().addComponents(select), buildBackRow()] }).catch(() => {});
+  return true;
+}
+
+async function promptVoiceCategories(interaction, ctx) {
+  await interaction.deferUpdate().catch(() => {});
+  const prisma = ctx.getPrisma();
+  const cfg = await pointsService.getPointsConfig(prisma);
+  const select = new ChannelSelectMenuBuilder()
+    .setCustomId('menu:points:voicecategories:set')
+    .setPlaceholder('Selecione categorias de voz permitidas')
+    .setMinValues(0)
+    .setMaxValues(25)
+    .addChannelTypes(ChannelType.GuildCategory);
+  if (cfg?.voiceCategories?.length) {
+    select.setDefaultChannels(...cfg.voiceCategories.map((c) => c.categoryId).slice(0, 25));
+  }
+  await interaction.editReply({ embeds: [buildEmbed(cfg)], components: [new ActionRowBuilder().addComponents(select), buildBackRow()] }).catch(() => {});
+  return true;
+}
+
 async function saveChannels(interaction, ctx) {
   await interaction.deferUpdate().catch(() => {});
   const prisma = ctx.getPrisma();
@@ -302,6 +351,40 @@ async function saveChannels(interaction, ctx) {
   await prisma.pointsChatChannel.deleteMany({ where: { pointsConfigId: cfg.id } });
   if (channelIds.length) {
     await prisma.pointsChatChannel.createMany({ data: channelIds.map((channelId) => ({ pointsConfigId: cfg.id, channelId, guildId: interaction.guildId })) });
+  }
+  invalidateCache();
+  const updated = await pointsService.getPointsConfig(prisma);
+  await interaction.editReply({ embeds: [buildEmbed(updated)], components: buildHomeComponents(updated) }).catch(() => {});
+  return true;
+}
+
+async function saveVoiceChannels(interaction, ctx) {
+  await interaction.deferUpdate().catch(() => {});
+  const prisma = ctx.getPrisma();
+  const cfg = await pointsService.getPointsConfig(prisma);
+  const channelIds = interaction.values || [];
+  await prisma.pointsVoiceChannel.deleteMany({ where: { pointsConfigId: cfg.id } });
+  if (channelIds.length) {
+    await prisma.pointsVoiceChannel.createMany({
+      data: channelIds.map((channelId) => ({ pointsConfigId: cfg.id, channelId, guildId: interaction.guildId })),
+    });
+  }
+  invalidateCache();
+  const updated = await pointsService.getPointsConfig(prisma);
+  await interaction.editReply({ embeds: [buildEmbed(updated)], components: buildHomeComponents(updated) }).catch(() => {});
+  return true;
+}
+
+async function saveVoiceCategories(interaction, ctx) {
+  await interaction.deferUpdate().catch(() => {});
+  const prisma = ctx.getPrisma();
+  const cfg = await pointsService.getPointsConfig(prisma);
+  const categoryIds = interaction.values || [];
+  await prisma.pointsVoiceCategory.deleteMany({ where: { pointsConfigId: cfg.id } });
+  if (categoryIds.length) {
+    await prisma.pointsVoiceCategory.createMany({
+      data: categoryIds.map((categoryId) => ({ pointsConfigId: cfg.id, categoryId, guildId: interaction.guildId })),
+    });
   }
   invalidateCache();
   const updated = await pointsService.getPointsConfig(prisma);
