@@ -11,7 +11,7 @@ const {
   ChannelType,
 } = require('discord.js');
 const { ensureModerationConfig } = require('../services/moderationConfig');
-const { COMMAND_TYPES } = require('../lib/moderation');
+const { COMMAND_TYPES, buildLogEmbed } = require('../lib/moderation');
 
 function buildSummaryEmbed(cfg, guild) {
   const fields = [];
@@ -117,6 +117,9 @@ function dmComponents(target) {
       new ButtonBuilder().setCustomId(`moderation:${target}:dm:back`).setLabel('Voltar').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(`moderation:${target}:dm:toggle`).setLabel('Ativar/Desativar DM').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId(`moderation:${target}:dm:message`).setLabel('Editar mensagem').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`moderation:${target}:dm:preview`).setLabel('Enviar exemplo').setStyle(ButtonStyle.Secondary),
+    ),
+    new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`moderation:${target}:dm:contact`).setLabel('Definir contato').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(`moderation:${target}:dm:clearcontact`).setLabel('Remover contato').setStyle(ButtonStyle.Danger),
     ),
@@ -273,6 +276,13 @@ async function handleButton(interaction, prisma) {
 
   if (id === 'moderation:castigo:dm:back') {
     await safeUpdate(interaction, { embeds: [buildCastigoEmbed(cfg)], components: castigoComponents() });
+    return true;
+  }
+
+  if (id === 'moderation:ban:dm:preview' || id === 'moderation:castigo:dm:preview') {
+    const target = id.includes('ban') ? 'ban' : 'castigo';
+    const previewPayload = buildDmPreviewPayload(interaction, cfg, target);
+    await safeReply(interaction, { ...previewPayload, ephemeral: true });
     return true;
   }
 
@@ -477,6 +487,30 @@ function extractId(value) {
   if (!value) return null;
   const match = String(value).match(/\d{5,}/);
   return match ? match[0] : null;
+}
+
+function buildDmPreviewPayload(interaction, cfg, target) {
+  const isBan = target === 'ban';
+  const enabled = isBan ? cfg.banDmEnabled : cfg.castigoDmEnabled;
+  const message = isBan ? cfg.banDmMessage : cfg.castigoDmMessage;
+  const contactId = isBan ? cfg.banDmContactId : cfg.castigoDmContactId;
+
+  const contentParts = [];
+  if (message) contentParts.push(message);
+  if (contactId) contentParts.push(`Contato: <@${contactId}>`);
+
+  // Monta embed igual ao envio real
+  const embed = buildLogEmbed({
+    type: isBan ? COMMAND_TYPES.BAN : COMMAND_TYPES.CASTIGO,
+    action: isBan ? 'BAN' : 'APPLY',
+    targetUser: interaction.user,
+    moderatorUser: interaction.user,
+    reason: 'Não informado',
+    guild: interaction.guild,
+  });
+
+  const content = contentParts.join('\n') || (enabled ? 'Mensagem vazia.' : 'DM desativada.');
+  return { content: content.slice(0, 1900), embeds: [embed] };
 }
 
 async function handleModal(interaction, prisma) {
