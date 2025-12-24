@@ -46,19 +46,6 @@ function registerInviteTracker(client, { isGuildAllowed } = {}) {
     isGuildAllowedFn = isGuildAllowed;
   }
 
-async function handleAntiReentryToggle(interaction, ctx) {
-  const prisma = ctx.getPrisma();
-  await ensurePointsConfig(prisma);
-  const pointsCfg = await getPointsConfig(prisma);
-  const next = !(pointsCfg?.inviteAntiReentryEnabled !== false);
-  await prisma.pointsConfig.update({ where: { id: pointsCfg.id }, data: { inviteAntiReentryEnabled: next } });
-  const updatedPointsCfg = await getPointsConfig(prisma);
-  // Re-render home with merged config to reflect toggle
-  const cfg = (await getGlobalConfig(prisma)) || (await ensureGlobalConfig(prisma));
-  const merged = { ...cfg, inviteAntiReentryEnabled: updatedPointsCfg?.inviteAntiReentryEnabled };
-  return renderHome(interaction, merged, { type: 'success', message: `Anti reentrada ${next ? 'ativado' : 'desativado'}.` });
-}
-
   client.once('clientReady', async () => {
     const prisma = getPrisma();
     await refreshRuntimeState(prisma);
@@ -310,9 +297,6 @@ async function handleRankingButtons(interaction) {
 
   if (customId === 'inviteRank:prev') {
     state.page = Math.max(1, state.page - 1); // No-op change
-    if (interaction.customId === 'menu:invite:antireentry') {
-      return handleAntiReentryToggle(interaction, ctx);
-    }
   } else if (customId === 'inviteRank:next') {
     state.page = Math.min(state.totalPages, state.page + 1);
   }
@@ -355,6 +339,18 @@ async function ensurePosse(interaction, ctx) {
     return false;
   }
   return true;
+}
+
+async function handleAntiReentryToggle(interaction, ctx) {
+  const prisma = ctx.getPrisma();
+  await ensurePointsConfig(prisma);
+  const pointsCfg = await getPointsConfig(prisma);
+  const next = !(pointsCfg?.inviteAntiReentryEnabled !== false);
+  await prisma.pointsConfig.update({ where: { id: pointsCfg.id }, data: { inviteAntiReentryEnabled: next } });
+  const updatedPointsCfg = await getPointsConfig(prisma);
+  const cfg = (await getGlobalConfig(prisma)) || (await ensureGlobalConfig(prisma));
+  const merged = { ...cfg, inviteAntiReentryEnabled: updatedPointsCfg?.inviteAntiReentryEnabled };
+  return renderHome(interaction, merged, { type: 'success', message: `Anti reentrada ${next ? 'ativado' : 'desativado'}.` });
 }
 
 async function renderHome(interaction, cfg, status) {
