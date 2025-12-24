@@ -111,6 +111,16 @@ async function handleCleanerButton(interaction, ctx) {
       creationSessions.delete(interaction.user.id);
       return renderHome(interaction, prisma, { type: 'info', message: 'Criação cancelada.' });
     }
+    if (sub === 'finish') {
+      return finishCreation(interaction, prisma);
+    }
+    if (sub === 'filter-modal') {
+      const session = creationSessions.get(interaction.user.id);
+      if (!session) {
+        return renderHome(interaction, prisma, { type: 'error', message: 'Sessão expirada. Clique em "Criar painel" novamente.' });
+      }
+      return showCreationFilterModal(interaction, session);
+    }
     cancelCollector(interaction.user.id);
     return startCreationFlow(interaction, prisma);
   }
@@ -145,7 +155,7 @@ async function handleCleanerButton(interaction, ctx) {
     }
     if (detail === 'filter-add') {
       cancelCollector(interaction.user.id);
-      return promptEditFilter(interaction, prisma, panelId);
+      return showFilterModal(interaction, prisma, panelId);
     }
     if (detail === 'filter-remove') {
       return clearFilter(interaction, prisma, panelId);
@@ -156,8 +166,9 @@ async function handleCleanerButton(interaction, ctx) {
         return renderHome(interaction, prisma, { type: 'error', message: 'Painel não encontrado.' });
       }
       await renderPanel(interaction, prisma, panelId);
-      const message = panel.filterMessageId
-        ? `Filtro atual: interrompe ao chegar na mensagem \`${panel.filterMessageId}\`.`
+      const ids = parseFilterIds(panel.filterMessageId);
+      const message = ids.length
+        ? `Filtro atual: não apaga as mensagens com ID ${formatFilterValue(ids)}.`
         : 'Este painel não possui filtro configurado.';
       await interaction.followUp({ content: message, ephemeral: true }).catch(() => {});
       return true;
@@ -194,7 +205,7 @@ async function handleCleanerChannelSelect(interaction, ctx) {
     }
     session.data.channelId = selected;
     session.data.guildId = interaction.guildId;
-    return promptCreationFilter(interaction, prisma);
+    return renderCreationFilterStep(interaction, session);
   }
 
   if (id.startsWith('menu:cleaner:panel:')) {
@@ -216,6 +227,46 @@ async function handleCleanerChannelSelect(interaction, ctx) {
   }
 
   return false;
+}
+
+async function showFilterModal(interaction, prisma, panelId) {
+  const panel = await prisma.channelCleanerPanel.findUnique({ where: { id: panelId } });
+  if (!panel) {
+    return renderHome(interaction, prisma, { type: 'error', message: 'Painel não encontrado.' });
+  }
+  const current = formatFilterValue(parseFilterIds(panel.filterMessageId));
+  const modal = new ModalBuilder()
+    .setCustomId(`menu:cleaner:panel:${panelId}:filter-modal`)
+    .setTitle('Filtro de mensagens');
+  const input = new TextInputBuilder()
+    .setCustomId('menu:cleaner:panel:filter:ids')
+    .setLabel('IDs separados por vírgula')
+    .setPlaceholder('Ex: 1453465273259659360, 1453465276254392351')
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(false);
+  if (current && current !== 'Não definido') {
+    input.setValue(current);
+  }
+  modal.addComponents(new ActionRowBuilder().addComponents(input));
+  await interaction.showModal(modal).catch(() => {});
+  return true;
+}
+
+async function showCreationFilterModal(interaction, session) {
+  const current = formatFilterValue(parseFilterIds(session.data.filterMessageId));
+  const modal = new ModalBuilder().setCustomId('menu:cleaner:create:filter-modal').setTitle('Filtro de mensagens');
+  const input = new TextInputBuilder()
+    .setCustomId('menu:cleaner:panel:filter:ids')
+    .setLabel('IDs separados por vírgula')
+    .setPlaceholder('Ex: 1453465273259659360, 1453465276254392351')
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(false);
+  if (current && current !== 'Não definido') {
+    input.setValue(current);
+  }
+  modal.addComponents(new ActionRowBuilder().addComponents(input));
+  await interaction.showModal(modal).catch(() => {});
+  return true;
 }
 
 async function handleCleanerModal(interaction, ctx) {
@@ -275,6 +326,52 @@ async function handleCleanerModal(interaction, ctx) {
     return renderPanel(interaction, prisma, panelId, { type: 'success', message: 'Nome e intervalo atualizados.' });
   }
 
+  if (id === 'menu:cleaner:create:filter-modal') {
+    const session = creationSessions.get(interaction.user.id);
+    if (!session) {
+      await interaction.reply({ content: 'Sessão expirada. Clique em "Criar painel" novamente.', ephemeral: true }).catch(() => {});
+      return true;
+    }
+    const raw = interaction.fields.getTextInputValue('menu:cleaner:panel:filter:ids')?.trim();
+    const ids = parseFilterIds(raw || '');
+    if (raw && ids.length === 0) {
+      await interaction.reply({ content: 'Informe IDs válidos, separados por vírgula.', ephemeral: true }).catch(() => {});
+      return true;
+    }
+    session.data.filterMessageId = ids.join(',') || null;
+    await interaction.deferUpdate().catch(() => {});
+    return renderCreationFilterStep(interaction, session);
+  }
+
+  if (id.startsWith('menu:cleaner:panel:') && id.endsWith(':filter-modal')) {
+    const parts = id.split(':');
+    const panelId = Number(parts[3]);
+    if (!Number.isInteger(panelId)) {
+      await interaction.reply({ content: 'Painel inválido.', ephemeral: true }).catch(() => {});
+      return true;
+    }
+    const raw = interaction.fields.getTextInputValue('menu:cleaner:panel:filter:ids')?.trim();
+    const ids = parseFilterIds(raw || '');
+    if (raw && ids.length === 0) {
+      await interaction.reply({ content: 'Informe IDs válidos, separados por vírgula.', ephemeral: true }).catch(() => {});
+      return true;
+    }
+    const panel = await prisma.channelCleanerPanel.findUnique({ where: { id: panelId } });
+    if (!panel) {
+      await interaction.reply({ content: 'Painel não encontrado.', ephemeral: true }).catch(() => {});
+      return true;
+    }
+    const stored = ids.join(',');
+    await prisma.channelCleanerPanel.update({ where: { id: panelId }, data: { filterMessageId: stored || null } });
+    await refreshPanels(prisma);
+    restartJobs();
+    await interaction.deferUpdate().catch(() => {});
+    return renderPanel(interaction, prisma, panelId, {
+      type: ids.length ? 'success' : 'info',
+      message: ids.length ? 'Filtro atualizado.' : 'Filtro removido.',
+    });
+  }
+
   return false;
 }
 
@@ -326,46 +423,31 @@ async function promptCreationChannel(interaction) {
   });
 }
 
-async function promptCreationFilter(interaction, prisma) {
-  const session = creationSessions.get(interaction.user.id);
-  if (!session) {
-    return renderHome(interaction, prisma, { type: 'error', message: 'Sessão expirada.' });
-  }
+async function renderCreationFilterStep(interaction, session) {
   session.step = 'filter';
+  const filterValue = formatFilterValue(parseFilterIds(session.data.filterMessageId));
   await renderCreationStep(interaction, session, {
     title: `Painel: ${session.data.name}`,
-    description: 'Opcional: informe o ID da mensagem limite ou digite **pular** para continuar sem filtro.',
+    description: 'Opcional: configure IDs de mensagem (separados por vírgula) que NÃO devem ser apagadas.',
+    components: [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('menu:cleaner:create:filter-modal')
+          .setLabel('Filtro de mensagens')
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId('menu:cleaner:create:finish')
+          .setLabel('Salvar painel')
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId('menu:cleaner:create:cancel')
+          .setLabel('Cancelar')
+          .setStyle(ButtonStyle.Danger),
+      ),
+    ],
+    extraFields: filterValue && filterValue !== 'Não definido' ? [{ name: 'Filtro atual', value: filterValue, inline: false }] : undefined,
   });
-  return collectTextValue(interaction, {
-    validator: (raw) => {
-      const trimmed = raw.trim().toLowerCase();
-      if (trimmed === 'pular') {
-        return { skip: true };
-      }
-      if (!/^\d{17,20}$/.test(raw.trim())) {
-        return null;
-      }
-      return { messageId: raw.trim() };
-    },
-    onSubmit: async (result) => {
-      const sess = creationSessions.get(interaction.user.id);
-      if (!sess) {
-        return renderHome(interaction, prisma, { type: 'error', message: 'Sessão expirada.' });
-      }
-      if (!result.skip) {
-        sess.data.filterMessageId = result.messageId;
-      }
-      await finishCreation(interaction, prisma);
-    },
-    onCancel: async () => {
-      creationSessions.delete(interaction.user.id);
-      await renderHome(interaction, prisma, { type: 'info', message: 'Criação cancelada.' });
-    },
-    onTimeout: async () => {
-      creationSessions.delete(interaction.user.id);
-      await renderHome(interaction, prisma, { type: 'error', message: 'Tempo esgotado.' });
-    },
-  });
+  return true;
 }
 
 async function finishCreation(interaction, prisma) {
@@ -623,16 +705,17 @@ async function runCleaner(panel, reason) {
   let lastId = null;
   let deleted = 0;
   let stop = false;
+  const filterIds = parseFilterIds(panel.filterMessageId);
   while (deleted < MAX_MESSAGES_PER_SWEEP && !stop) {
     const batch = await channel.messages.fetch({ limit: 100, before: lastId || undefined }).catch(() => null);
     if (!batch || batch.size === 0) break;
     const bulk = [];
     const singles = [];
     for (const message of batch.values()) {
+      lastId = message.id;
       if (message.pinned) continue;
-      if (panel.filterMessageId && message.id === panel.filterMessageId) {
-        stop = true;
-        break;
+      if (filterIds.length && filterIds.includes(message.id)) {
+        continue; // protege IDs filtrados (não apaga)
       }
       const age = Date.now() - message.createdTimestamp;
       if (age <= BULK_WINDOW_MS) {
@@ -640,7 +723,6 @@ async function runCleaner(panel, reason) {
       } else {
         singles.push(message);
       }
-      lastId = message.id;
       if (bulk.length >= MAX_BULK_DELETE) break;
       if (deleted + bulk.length + singles.length >= MAX_MESSAGES_PER_SWEEP) break;
     }
@@ -724,6 +806,7 @@ function buildHomeComponents(panels) {
 }
 
 function buildPanelEmbed(panel, status) {
+  const filterValue = formatFilterValue(parseFilterIds(panel.filterMessageId));
   const embed = new EmbedBuilder()
     .setTitle(`🧹 Painel: ${panel.name}`)
     .setColor(panel.isActive ? 0x57f287 : 0xed4245)
@@ -733,7 +816,7 @@ function buildPanelEmbed(panel, status) {
       { name: 'Canal', value: `<#${panel.channelId}>`, inline: true },
       {
         name: 'Filtro de mensagem',
-        value: panel.filterMessageId ? `Parar ao chegar em \`${panel.filterMessageId}\`` : 'Não definido',
+        value: filterValue !== 'Não definido' ? `Não apagar: ${filterValue}` : 'Não definido',
         inline: true,
       },
       {
@@ -761,25 +844,31 @@ function buildPanelComponents(panel) {
         .setStyle(ButtonStyle.Primary),
       new ButtonBuilder()
         .setCustomId(`menu:cleaner:panel:${panel.id}:filter-add`)
-        .setLabel('Adicionar filtro')
+        .setLabel('Filtro de mensagens')
         .setStyle(ButtonStyle.Primary),
       new ButtonBuilder()
         .setCustomId(`menu:cleaner:panel:${panel.id}:filter-list`)
         .setLabel('Listar filtro')
         .setStyle(ButtonStyle.Secondary),
+    ),
+    new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(`menu:cleaner:panel:${panel.id}:filter-remove`)
         .setLabel('Remover filtro')
         .setStyle(ButtonStyle.Danger)
         .setDisabled(!panel.filterMessageId),
-    ),
-    new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(`menu:cleaner:panel:${panel.id}:toggle`)
         .setLabel(panel.isActive ? 'Pausar' : 'Ativar')
         .setStyle(panel.isActive ? ButtonStyle.Secondary : ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(`menu:cleaner:panel:${panel.id}:run`).setLabel('Executar agora').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(`menu:cleaner:panel:${panel.id}:delete`).setLabel('Excluir').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId(`menu:cleaner:panel:${panel.id}:run`)
+        .setLabel('Executar agora')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`menu:cleaner:panel:${panel.id}:delete`)
+        .setLabel('Excluir')
+        .setStyle(ButtonStyle.Danger),
     ),
     new ActionRowBuilder().addComponents(
       new ChannelSelectMenuBuilder()
@@ -808,8 +897,13 @@ async function renderCreationStep(interaction, session, options) {
       { name: 'Nome', value: session.data.name || '—', inline: true },
       { name: 'Canal', value: session.data.channelId ? `<#${session.data.channelId}>` : '—', inline: true },
       { name: 'Intervalo', value: session.data.intervalSeconds ? formatInterval(session.data.intervalSeconds) : '—', inline: true },
-      { name: 'Filtro', value: session.data.filterMessageId ? `Até ${session.data.filterMessageId}` : 'Sem filtro', inline: true },
+      { name: 'Filtro', value: formatFilterValue(parseFilterIds(session.data.filterMessageId)), inline: true },
     );
+  if (options.extraFields && Array.isArray(options.extraFields)) {
+    for (const field of options.extraFields) {
+      embed.addFields(field);
+    }
+  }
   await interaction
     .editReply({ embeds: [embed], components: options.components || [buildCreationControls()] })
     .catch(() => {});
@@ -878,6 +972,19 @@ function parseDuration(input) {
   return seconds;
 }
 
+function parseFilterIds(value) {
+  if (!value) return [];
+  return value
+    .split(',')
+    .map((v) => v.trim())
+    .filter((v) => /^\d{17,20}$/.test(v));
+}
+
+function formatFilterValue(ids) {
+  if (!ids || !ids.length) return 'Não definido';
+  return ids.join(', ');
+}
+
 function formatInterval(seconds) {
   if (seconds >= 3600) {
     return `${(seconds / 3600).toFixed(seconds % 3600 === 0 ? 0 : 1)} h`;
@@ -907,9 +1014,15 @@ function shouldOpenCleanerModal(customId) {
   if (customId === 'menu:cleaner:create:start') {
     return true;
   }
+  if (customId === 'menu:cleaner:create:filter-modal') {
+    return true;
+  }
   if (customId.startsWith('menu:cleaner:panel:')) {
     const detail = customId.split(':')[4];
     if (detail === 'edit-config') {
+      return true;
+    }
+    if (detail === 'filter-add') {
       return true;
     }
   }
