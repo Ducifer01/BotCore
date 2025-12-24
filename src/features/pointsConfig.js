@@ -547,6 +547,15 @@ async function sendRules(interaction, ctx) {
 function buildRulesEmbed(cfg, guild) {
   const modeLabel = cfg?.mode === 'SELECTIVE' ? 'Seletivo' : 'Global';
   const participantRoles = cfg?.participantRoles?.length ? cfg.participantRoles.map((r) => `<@&${r}>`).join(', ') : 'Todos';
+  const chatChannels = cfg?.chatChannels?.length
+    ? cfg.chatChannels.map((c) => `<#${c}>`).join(', ')
+    : 'Todos (sem filtro)';
+  const voiceChannels = cfg?.voiceChannels?.length
+    ? cfg.voiceChannels.map((c) => `<#${c}>`).join(', ')
+    : 'Todos (sem filtro)';
+  const voiceCategories = cfg?.voiceCategories?.length
+    ? cfg.voiceCategories.map((c) => `<#${c}>`).join(', ')
+    : 'Todas (sem filtro)';
 
   const lines = [
     '**Sistema de pontos**',
@@ -559,6 +568,9 @@ function buildRulesEmbed(cfg, guild) {
     `Convites: +${cfg?.pontosConvites || 0}`,
     `Min. caracteres por mensagem: ${cfg?.qtdCaracteresMin || 0}`,
     `Cargos que pontuam: ${participantRoles}`,
+  `Canais de chat que pontuam: ${chatChannels}`,
+  `Canais de voz que pontuam: ${voiceChannels}`,
+  `Categorias de voz que pontuam: ${voiceCategories}`,
     '',
     '**Comandos úteis**',
     '/pontos',
