@@ -1,6 +1,32 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { getPrisma } = require('../db');
 const { ensurePointsConfig, getPointsConfig, toBigInt } = require('../services/points');
+
+const PAGE_SIZE = 10;
+const MAX_PAGES = 5;
+
+function buildPageEmbed(txs, page) {
+  const lines = txs.map((tx) => {
+    const amt = toBigInt(tx.amount || 0n);
+    const sign = amt >= 0n ? '+' : '-';
+    const abs = amt < 0n ? -amt : amt;
+    const when = Math.floor(new Date(tx.createdAt).getTime() / 1000);
+    return `${sign}${abs} (${tx.type || 'N/A'}) — ${tx.reason || 'Sem motivo'} — <t:${when}:R>`;
+  });
+
+  return new EmbedBuilder()
+    .setTitle('Histórico de pontos')
+    .setColor(0x5865f2)
+    .setDescription(lines.join('\n'))
+    .setFooter({ text: `Página ${page}` })
+    .setTimestamp(new Date());
+}
+
+function buildButtons(current, total) {
+  const prev = new ButtonBuilder().setCustomId('hist:prev').setLabel('◀').setStyle(ButtonStyle.Secondary).setDisabled(current <= 1);
+  const next = new ButtonBuilder().setCustomId('hist:next').setLabel('▶').setStyle(ButtonStyle.Secondary).setDisabled(current >= total);
+  return [new ActionRowBuilder().addComponents(prev, next)];
+}
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -15,27 +41,53 @@ module.exports = {
     const txs = await prisma.pointsTransaction.findMany({
       where: { guildId, userId },
       orderBy: { createdAt: 'desc' },
-      take: 15,
+      take: PAGE_SIZE * MAX_PAGES,
     });
 
     if (!txs.length) {
       return interaction.reply({ content: 'Nenhum histórico de pontos encontrado.', ephemeral: true });
     }
 
-    const lines = txs.map((tx) => {
-      const amt = toBigInt(tx.amount || 0n);
-      const sign = amt >= 0n ? '+' : '-';
-      const abs = amt < 0n ? -amt : amt;
-      const when = Math.floor(new Date(tx.createdAt).getTime() / 1000);
-      return `${sign}${abs} (${tx.type || 'N/A'}) — ${tx.reason || 'Sem motivo'} — <t:${when}:R>`;
+    const totalPages = Math.max(1, Math.ceil(txs.length / PAGE_SIZE));
+    let page = 1;
+
+    const render = async (i) => {
+      const start = (page - 1) * PAGE_SIZE;
+      const slice = txs.slice(start, start + PAGE_SIZE);
+      const embed = buildPageEmbed(slice, page);
+      const components = buildButtons(page, totalPages);
+      if (i.replied || i.deferred) {
+        await i.editReply({ embeds: [embed], components });
+      } else {
+        await i.reply({ embeds: [embed], components, ephemeral: true, fetchReply: true });
+      }
+    };
+
+    const msg = await interaction.reply({
+      embeds: [buildPageEmbed(txs.slice(0, PAGE_SIZE), page)],
+      components: buildButtons(page, totalPages),
+      ephemeral: true,
+      fetchReply: true,
     });
 
-    const embed = new EmbedBuilder()
-      .setTitle('Histórico de pontos (últimos 15)')
-      .setColor(0x5865f2)
-      .setDescription(lines.join('\n'))
-      .setTimestamp(new Date());
+    const collector = msg.createMessageComponentCollector({
+      time: 2 * 60_000,
+      filter: (i) => i.user.id === interaction.user.id,
+    });
 
-    await interaction.reply({ embeds: [embed], ephemeral: true });
+    collector.on('collect', async (i) => {
+      await i.deferUpdate().catch(() => {});
+      if (i.customId === 'hist:prev' && page > 1) {
+        page -= 1;
+      }
+      if (i.customId === 'hist:next' && page < totalPages) {
+        page += 1;
+      }
+      await msg.edit({ embeds: [buildPageEmbed(txs.slice((page - 1) * PAGE_SIZE, (page - 1) * PAGE_SIZE + PAGE_SIZE), page)], components: buildButtons(page, totalPages) }).catch(() => {});
+    });
+
+    collector.on('end', async () => {
+      await msg.edit({ components: [] }).catch(() => {});
+    });
   },
 };

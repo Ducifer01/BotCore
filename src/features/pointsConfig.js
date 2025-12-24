@@ -231,23 +231,29 @@ async function showNumbersModal(interaction, ctx, which) {
 }
 
 async function handleNumbersModal(interaction, ctx, which) {
+  await interaction.deferUpdate().catch(() => {});
   const prisma = ctx.getPrisma();
   const cfg = await pointsService.getPointsConfig(prisma);
   const values = {};
-  const getVal = (id) => Number(interaction.fields.getTextInputValue(id) || '0');
+  const getVal = (id) => {
+    const raw = (interaction.fields.getTextInputValue(id) || '').trim();
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed)) return 0;
+    return parsed;
+  };
   if (which === 'numbers1') {
-    values.pontosChat = BigInt(Math.max(0, getVal('pontos_chat')));
-    values.pontosCall = BigInt(Math.max(0, getVal('pontos_call')));
-    values.pontosConvites = BigInt(Math.max(0, getVal('pontos_convites')));
+    values.pontosChat = BigInt(Math.max(0, Math.trunc(getVal('pontos_chat'))));
+    values.pontosCall = BigInt(Math.max(0, Math.trunc(getVal('pontos_call'))));
+    values.pontosConvites = BigInt(Math.max(0, Math.trunc(getVal('pontos_convites'))));
     values.cooldownChatMinutes = getVal('cooldown_chat');
     const lim = getVal('limit_diario');
     values.limitDailyChat = lim > 0 ? BigInt(lim) : null;
   } else {
-    values.tempoCallMinutes = getVal('tempo_call');
-    values.minUserCall = getVal('min_user_call');
-    values.qtdCaracteresMin = getVal('qtd_caracteres');
-    values.diasConvite = getVal('dias_convite');
-    values.tempoServerHours = getVal('tempo_server');
+    values.tempoCallMinutes = Math.max(0, getVal('tempo_call'));
+    values.minUserCall = Math.max(0, getVal('min_user_call'));
+    values.qtdCaracteresMin = Math.max(0, getVal('qtd_caracteres'));
+    values.diasConvite = Math.max(0, getVal('dias_convite'));
+    values.tempoServerHours = Math.max(0, getVal('tempo_server'));
   }
   await prisma.pointsConfig.update({ where: { id: cfg.id }, data: values });
   invalidateCache();

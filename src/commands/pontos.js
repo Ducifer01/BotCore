@@ -49,11 +49,12 @@ module.exports = {
         const remainder = blockSeconds - (session?.accumulatedSeconds || 0);
         const timeRemaining = remainder <= 0 ? blockSeconds : remainder;
         const nextAward = cfg.pontosCall || 0;
+        const ts = Math.floor((Date.now() + timeRemaining * 1000) / 1000);
         callInfo = [
           `Canal: ${channel.name}`,
           `Status: ${eligible ? 'Elegível' : 'Não elegível'}${muted ? ' (mutado)' : ''}${deaf ? ' (deafen)' : ''}`,
           `Participantes ativos: ${participantCount}/${minUsers}`,
-          eligible ? `Próximo ganho: +${nextAward} pts em ${formatSeconds(timeRemaining)}` : 'Próximo ganho: —',
+          eligible ? `Próximo ganho: +${nextAward} pts <t:${ts}:R>` : 'Próximo ganho: —',
         ].join('\n');
       }
     }
