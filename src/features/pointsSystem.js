@@ -79,12 +79,7 @@ async function handleGuildMemberAdd(member) {
     const prisma = getPrisma();
     const cfg = await loadConfig(prisma);
     if (!isSystemEnabled(cfg)) return;
-    const createdAt = member.user?.createdAt ? member.user.createdAt.getTime() : Date.now();
-    const ageDays = (Date.now() - createdAt) / (24 * 60 * 60 * 1000);
-    const inviterId = member?.client?.invites?.get?.(member.id) || null; // placeholder (inviteTracker integration elsewhere)
-    if (inviterId) {
-      await handleInviteJoin({ guildId: member.guild.id, inviterId, inviteeId: member.id, invitedAt: new Date(), accountAgeDays: ageDays, prisma, cfg });
-    }
+    // Integração real é feita no inviteTracker; aqui não processamos convites para evitar duplicidade/placeholder incorreto.
   } catch (err) {
     console.warn('[points] erro member add', err?.message || err);
   }
@@ -95,7 +90,7 @@ async function handleGuildMemberRemove(member) {
     const prisma = getPrisma();
     const cfg = await loadConfig(prisma);
     if (!isSystemEnabled(cfg)) return;
-    await handleInviteLeave({ guildId: member.guild.id, inviteeId: member.id, prisma, cfg });
+    // Integração real de revogação via inviteTracker; evitamos duplicidade aqui.
   } catch (err) {
     console.warn('[points] erro member remove', err?.message || err);
   }

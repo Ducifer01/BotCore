@@ -11,7 +11,7 @@ const {
 } = require('discord.js');
 const { getGlobalConfig, ensureGlobalConfig } = require('../services/globalConfig');
 const { getPrisma } = require('../db');
-const { getPointsConfig, handleInviteJoin: handlePointsInviteJoin } = require('../services/points');
+const { getPointsConfig, handleInviteJoin: handlePointsInviteJoin, handleInviteLeave: handlePointsInviteLeave } = require('../services/points');
 
 const PAGE_SIZE = 50;
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
@@ -75,6 +75,18 @@ function registerInviteTracker(client, { isGuildAllowed } = {}) {
     const guildMap = inviteCache.get(invite.guildId);
     if (!guildMap) return;
     guildMap.delete(invite.code);
+  });
+
+  client.on('guildMemberRemove', async (member) => {
+    try {
+      if (!isGuildAllowedFn(member.guild.id)) return;
+      const prisma = getPrisma();
+      const pointsCfg = await getPointsConfig(prisma);
+      if (!pointsCfg?.enabled) return;
+      await handlePointsInviteLeave({ guildId: member.guild.id, inviteeId: member.id, prisma, cfg: pointsCfg });
+    } catch (error) {
+      console.warn('[invites->points] Falha ao processar saída de membro:', error?.message || error);
+    }
   });
 }
 

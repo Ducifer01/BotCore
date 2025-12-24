@@ -326,6 +326,12 @@ async function handleInviteJoin({ guildId, inviterId, inviteeId, invitedAt, acco
   if (!inviterId || !inviteeId || inviterId === inviteeId) return;
   const globalConfigId = cfg.globalConfigId || cfg.id;
   const idadeMin = cfg.idadeContaDias || 0;
+  // Se já foi confirmado alguma vez, nunca paga novamente (anti-farm)
+  const existing = await prisma.pointsInviteLedger.findUnique({ where: { guildId_inviteeId: { guildId, inviteeId } } });
+  if (existing?.confirmedAt) {
+    return; // já confirmou no passado, não gera pendência nem nova premiação
+  }
+  const tempoServerHours = cfg.tempoServerHours || 0;
   if (accountAgeDays !== undefined && accountAgeDays < idadeMin) {
     await prisma.pointsInviteLedger.upsert({
       where: { guildId_inviteeId: { guildId, inviteeId } },
@@ -343,6 +349,39 @@ async function handleInviteJoin({ guildId, inviterId, inviteeId, invitedAt, acco
     });
     return;
   }
+
+  // Aprovação instantânea se tempoServerHours <= 0
+  if (tempoServerHours <= 0) {
+    const amount = toBigInt(cfg.pontosConvites || 0n);
+    const now = new Date();
+    await prisma.pointsInviteLedger.upsert({
+      where: { guildId_inviteeId: { guildId, inviteeId } },
+      update: {
+        inviterId,
+        invitedAt: invitedAt || now,
+        status: 'CONFIRMED',
+        confirmedAt: now,
+        revokedAt: null,
+        revokedReason: null,
+        pointsAwarded: amount,
+      },
+      create: {
+        globalConfigId,
+        guildId,
+        inviterId,
+        inviteeId,
+        invitedAt: invitedAt || now,
+        status: 'CONFIRMED',
+        confirmedAt: now,
+        pointsAwarded: amount,
+      },
+    });
+    if (amount !== 0n) {
+      await recordTransaction(prisma, cfg, { guildId, userId: inviterId, amount, type: 'INVITE', source: 'SYSTEM', reason: 'Convite válido' });
+    }
+    return;
+  }
+
   await prisma.pointsInviteLedger.upsert({
     where: { guildId_inviteeId: { guildId, inviteeId } },
     update: {
@@ -392,6 +431,11 @@ async function confirmPendingInvites({ prisma, cfg, client }) {
   const cutoff = new Date(Date.now() - tempoServerHours * MINUTE_MS * 60);
   const pendings = await prisma.pointsInviteLedger.findMany({ where: { status: 'PENDING', invitedAt: { lte: cutoff }, globalConfigId: cfg.globalConfigId || cfg.id } });
   for (const entry of pendings) {
+    // Anti-farm: se já tem confirmedAt (algum fluxo anterior), não pagar de novo
+    if (entry.confirmedAt) {
+      await prisma.pointsInviteLedger.update({ where: { id: entry.id }, data: { status: 'CONFIRMED' } });
+      continue;
+    }
     const guild = client?.guilds?.cache?.get(entry.guildId);
     if (!guild) continue;
     const member = await guild.members.fetch(entry.inviteeId).catch(() => null);
