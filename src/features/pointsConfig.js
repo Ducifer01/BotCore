@@ -33,11 +33,19 @@ function buildEmbed(cfg) {
     .setTimestamp(new Date());
 }
 
-function buildHomeComponents() {
+function buildHomeComponents(cfg) {
+  const isEnabled = !!cfg?.enabled;
+  const modeLabel = cfg?.mode === 'SELECTIVE' ? 'Modo: Seletivo' : 'Modo: Global';
   return [
     new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('menu:points:toggle').setLabel('Ativar/Desativar').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('menu:points:mode').setLabel('Modo (Global/Seletivo)').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId('menu:points:toggle')
+        .setLabel(isEnabled ? 'Desativar' : 'Ativar')
+        .setStyle(isEnabled ? ButtonStyle.Danger : ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId('menu:points:mode')
+        .setLabel(modeLabel)
+        .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('menu:points:numbers1').setLabel('Pontos / Cooldown').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId('menu:points:numbers2').setLabel('Call / Regras').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId('menu:points:leaderboard').setLabel('Refresh painel').setStyle(ButtonStyle.Secondary),
@@ -61,7 +69,7 @@ async function presentMenu(interaction, ctx) {
   const cfg = await pointsService.ensurePointsConfig(prisma);
   const fullCfg = await pointsService.getPointsConfig(prisma);
   const embed = buildEmbed(fullCfg || cfg);
-  await interaction.editReply({ embeds: [embed], components: buildHomeComponents() }).catch(() => {});
+  await interaction.editReply({ embeds: [embed], components: buildHomeComponents(fullCfg || cfg) }).catch(() => {});
   return true;
 }
 
@@ -132,7 +140,7 @@ async function toggleEnabled(interaction, ctx) {
   await prisma.pointsConfig.update({ where: { id: cfg.id }, data: { enabled: next } });
   invalidateCache();
   const updated = await pointsService.getPointsConfig(prisma);
-  await interaction.editReply({ embeds: [buildEmbed(updated)], components: buildHomeComponents() }).catch(() => {});
+  await interaction.editReply({ embeds: [buildEmbed(updated)], components: buildHomeComponents(updated) }).catch(() => {});
   return true;
 }
 
@@ -144,7 +152,7 @@ async function toggleMode(interaction, ctx) {
   await prisma.pointsConfig.update({ where: { id: cfg.id }, data: { mode: next } });
   invalidateCache();
   const updated = await pointsService.getPointsConfig(prisma);
-  await interaction.editReply({ embeds: [buildEmbed(updated)], components: buildHomeComponents() }).catch(() => {});
+  await interaction.editReply({ embeds: [buildEmbed(updated)], components: buildHomeComponents(updated) }).catch(() => {});
   return true;
 }
 
@@ -261,7 +269,7 @@ async function handleNumbersModal(interaction, ctx, which) {
   await prisma.pointsConfig.update({ where: { id: cfg.id }, data: values });
   invalidateCache();
   const updated = await pointsService.getPointsConfig(prisma);
-  await interaction.editReply({ embeds: [buildEmbed(updated)], components: buildHomeComponents() }).catch(() => {});
+  await interaction.editReply({ embeds: [buildEmbed(updated)], components: buildHomeComponents(updated) }).catch(() => {});
   return true;
 }
 
@@ -290,7 +298,7 @@ async function saveChannels(interaction, ctx) {
   }
   invalidateCache();
   const updated = await pointsService.getPointsConfig(prisma);
-  await interaction.editReply({ embeds: [buildEmbed(updated)], components: buildHomeComponents() }).catch(() => {});
+  await interaction.editReply({ embeds: [buildEmbed(updated)], components: buildHomeComponents(updated) }).catch(() => {});
   return true;
 }
 
@@ -323,7 +331,7 @@ async function saveRoles(interaction, ctx, kind) {
   }
   invalidateCache();
   const updated = await pointsService.getPointsConfig(prisma);
-  await interaction.editReply({ embeds: [buildEmbed(updated)], components: buildHomeComponents() }).catch(() => {});
+  await interaction.editReply({ embeds: [buildEmbed(updated)], components: buildHomeComponents(updated) }).catch(() => {});
   return true;
 }
 
@@ -349,7 +357,7 @@ async function saveIgnoredUsers(interaction, ctx) {
   }
   invalidateCache();
   const updated = await pointsService.getPointsConfig(prisma);
-  await interaction.editReply({ embeds: [buildEmbed(updated)], components: buildHomeComponents() }).catch(() => {});
+  await interaction.editReply({ embeds: [buildEmbed(updated)], components: buildHomeComponents(updated) }).catch(() => {});
   return true;
 }
 
@@ -403,7 +411,7 @@ async function saveLogChannel(interaction, ctx, kind) {
   await prisma.pointsConfig.update({ where: { id: cfg.id }, data });
   invalidateCache();
   const updated = await pointsService.getPointsConfig(prisma);
-  await interaction.editReply({ embeds: [buildEmbed(updated)], components: buildHomeComponents() }).catch(() => {});
+  await interaction.editReply({ embeds: [buildEmbed(updated)], components: buildHomeComponents(updated) }).catch(() => {});
   return true;
 }
 
@@ -415,7 +423,7 @@ async function handleLeaderboardModal(interaction, ctx) {
   await prisma.pointsConfig.update({ where: { id: cfg.id }, data: { leaderboardRefreshMinutes: minutes } });
   invalidateCache();
   const updated = await pointsService.getPointsConfig(prisma);
-  await interaction.editReply({ embeds: [buildEmbed(updated)], components: buildHomeComponents() }).catch(() => {});
+  await interaction.editReply({ embeds: [buildEmbed(updated)], components: buildHomeComponents(updated) }).catch(() => {});
   return true;
 }
 

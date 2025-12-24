@@ -87,11 +87,15 @@ function summaryComponents() {
   ];
 }
 
-function banComponents() {
+function banComponents(cfg) {
+  const enabled = !!cfg?.banEnabled;
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('moderation:back:root').setLabel('Voltar').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('moderation:ban:toggle').setLabel('Ativar/Desativar').setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId('moderation:ban:toggle')
+        .setLabel(enabled ? 'Desativar' : 'Ativar')
+        .setStyle(enabled ? ButtonStyle.Danger : ButtonStyle.Success),
       new ButtonBuilder().setCustomId('moderation:ban:log').setLabel('Config Log').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('moderation:ban:perms').setLabel('Permissões').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('moderation:ban:dm').setLabel('Config DM').setStyle(ButtonStyle.Secondary),
@@ -99,11 +103,15 @@ function banComponents() {
   ];
 }
 
-function castigoComponents() {
+function castigoComponents(cfg) {
+  const enabled = !!cfg?.castigoEnabled;
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('moderation:back:root').setLabel('Voltar').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('moderation:castigo:toggle').setLabel('Ativar/Desativar').setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId('moderation:castigo:toggle')
+        .setLabel(enabled ? 'Desativar' : 'Ativar')
+        .setStyle(enabled ? ButtonStyle.Danger : ButtonStyle.Success),
       new ButtonBuilder().setCustomId('moderation:castigo:log').setLabel('Config Log').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('moderation:castigo:perms').setLabel('Permissões').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('moderation:castigo:dm').setLabel('Config DM').setStyle(ButtonStyle.Secondary),
@@ -186,26 +194,26 @@ async function handleButton(interaction, prisma) {
   }
 
   if (id === 'moderation:ban') {
-    await safeUpdate(interaction, { embeds: [buildBanEmbed(cfg)], components: banComponents() });
+      await safeUpdate(interaction, { embeds: [buildBanEmbed(cfg)], components: banComponents(cfg) });
     return true;
   }
 
   if (id === 'moderation:castigo') {
-    await safeUpdate(interaction, { embeds: [buildCastigoEmbed(cfg)], components: castigoComponents() });
+      await safeUpdate(interaction, { embeds: [buildCastigoEmbed(cfg)], components: castigoComponents(cfg) });
     return true;
   }
 
   if (id === 'moderation:ban:toggle') {
     await prisma.moderationConfig.update({ where: { id: cfg.id }, data: { banEnabled: !cfg.banEnabled } });
     const updated = await ensureModerationConfig(prisma);
-    await safeUpdate(interaction, { embeds: [buildBanEmbed(updated)], components: banComponents() });
+    await safeUpdate(interaction, { embeds: [buildBanEmbed(updated)], components: banComponents(updated) });
     return true;
   }
 
   if (id === 'moderation:castigo:toggle') {
     await prisma.moderationConfig.update({ where: { id: cfg.id }, data: { castigoEnabled: !cfg.castigoEnabled } });
     const updated = await ensureModerationConfig(prisma);
-    await safeUpdate(interaction, { embeds: [buildCastigoEmbed(updated)], components: castigoComponents() });
+    await safeUpdate(interaction, { embeds: [buildCastigoEmbed(updated)], components: castigoComponents(updated) });
     return true;
   }
 
@@ -223,7 +231,7 @@ async function handleButton(interaction, prisma) {
     const updated = await ensureModerationConfig(prisma);
     await safeUpdate(interaction, {
       embeds: [id.includes('ban') ? buildBanEmbed(updated) : buildCastigoEmbed(updated)],
-      components: id.includes('ban') ? banComponents() : castigoComponents(),
+        components: id.includes('ban') ? banComponents(updated) : castigoComponents(updated),
     });
     await safeReply(interaction, { content: 'Logs desativados.', ephemeral: true });
     return true;
@@ -243,7 +251,7 @@ async function handleButton(interaction, prisma) {
     const updated = await ensureModerationConfig(prisma);
     await safeUpdate(interaction, {
       embeds: [commandType === COMMAND_TYPES.BAN ? buildBanEmbed(updated) : buildCastigoEmbed(updated)],
-      components: commandType === COMMAND_TYPES.BAN ? banComponents() : castigoComponents(),
+      components: commandType === COMMAND_TYPES.BAN ? banComponents(updated) : castigoComponents(updated),
     });
     await safeReply(interaction, { content: 'Permissões limpas. Apenas posse/admin podem usar.', ephemeral: true });
     return true;
@@ -270,12 +278,12 @@ async function handleButton(interaction, prisma) {
   }
 
   if (id === 'moderation:ban:dm:back') {
-    await safeUpdate(interaction, { embeds: [buildBanEmbed(cfg)], components: banComponents() });
+    await safeUpdate(interaction, { embeds: [buildBanEmbed(cfg)], components: banComponents(cfg) });
     return true;
   }
 
   if (id === 'moderation:castigo:dm:back') {
-    await safeUpdate(interaction, { embeds: [buildCastigoEmbed(cfg)], components: castigoComponents() });
+    await safeUpdate(interaction, { embeds: [buildCastigoEmbed(cfg)], components: castigoComponents(cfg) });
     return true;
   }
 
@@ -313,12 +321,12 @@ async function handleSelect(interaction, prisma) {
     if (id.includes('ban')) {
       await prisma.moderationConfig.update({ where: { id: cfg.id }, data: { banLogChannelId: value } });
       const updated = await ensureModerationConfig(prisma);
-      await safeUpdate(interaction, { embeds: [buildBanEmbed(updated)], components: banComponents() });
+      await safeUpdate(interaction, { embeds: [buildBanEmbed(updated)], components: banComponents(updated) });
       await safeReply(interaction, { content: `Log de ban definido: <#${value}>`, ephemeral: true });
     } else {
       await prisma.moderationConfig.update({ where: { id: cfg.id }, data: { castigoLogChannelId: value } });
       const updated = await ensureModerationConfig(prisma);
-      await safeUpdate(interaction, { embeds: [buildCastigoEmbed(updated)], components: castigoComponents() });
+      await safeUpdate(interaction, { embeds: [buildCastigoEmbed(updated)], components: castigoComponents(updated) });
       await safeReply(interaction, { content: `Log de castigo definido: <#${value}>`, ephemeral: true });
     }
 
@@ -339,7 +347,7 @@ async function handleSelect(interaction, prisma) {
     const updated = await ensureModerationConfig(prisma);
     await safeUpdate(interaction, {
       embeds: [commandType === COMMAND_TYPES.BAN ? buildBanEmbed(updated) : buildCastigoEmbed(updated)],
-      components: commandType === COMMAND_TYPES.BAN ? banComponents() : castigoComponents(),
+      components: commandType === COMMAND_TYPES.BAN ? banComponents(updated) : castigoComponents(updated),
     });
     await safeReply(interaction, { content: 'Permissões atualizadas.', ephemeral: true });
     return true;
