@@ -430,51 +430,8 @@ async function showDmConfig(interaction, cfg, target) {
       { name: 'Mensagem atual', value: messageText.slice(0, 1024), inline: false },
     )
     .setColor(0x5865F2);
-  await interaction.update({ embeds: [embed], components: dmComponents(target) });
+  await safeUpdate(interaction, { embeds: [embed], components: dmComponents(target) });
   return true;
-}
-
-async function handleSelect(interaction, prisma) {
-  const id = interaction.customId;
-  const cfg = await ensureModerationConfig(prisma);
-  if (id === 'moderation:ban:log:set' || id === 'moderation:castigo:log:set') {
-    const value = interaction.values?.[0];
-    if (!value) {
-      await interaction.reply({ content: 'Seleção inválida.', ephemeral: true });
-      return true;
-    }
-    if (id.includes('ban')) {
-      await prisma.moderationConfig.update({ where: { id: cfg.id }, data: { banLogChannelId: value } });
-      const updated = await ensureModerationConfig(prisma);
-      await interaction.update({ embeds: [buildBanEmbed(updated)], components: banComponents() });
-      await interaction.followUp({ content: `Log de ban definido: <#${value}>`, ephemeral: true });
-    } else {
-      await prisma.moderationConfig.update({ where: { id: cfg.id }, data: { castigoLogChannelId: value } });
-      const updated = await ensureModerationConfig(prisma);
-      await interaction.update({ embeds: [buildCastigoEmbed(updated)], components: castigoComponents() });
-      await interaction.followUp({ content: `Log de castigo definido: <#${value}>`, ephemeral: true });
-    }
-    return true;
-  }
-  if (id === 'moderation:ban:perms:set' || id === 'moderation:castigo:perms:set') {
-    const cleaned = interaction.values || [];
-    await prisma.moderationPermission.deleteMany({
-      where: { moderationConfigId: cfg.id, commandType: id.includes('ban') ? COMMAND_TYPES.BAN : COMMAND_TYPES.CASTIGO },
-    });
-    if (cleaned.length) {
-      await prisma.moderationPermission.createMany({
-        data: cleaned.map((roleId) => ({ moderationConfigId: cfg.id, commandType: id.includes('ban') ? COMMAND_TYPES.BAN : COMMAND_TYPES.CASTIGO, roleId })),
-      });
-    }
-    const updated = await ensureModerationConfig(prisma);
-    await interaction.update({
-      embeds: [id.includes('ban') ? buildBanEmbed(updated) : buildCastigoEmbed(updated)],
-      components: id.includes('ban') ? banComponents() : castigoComponents(),
-    });
-    await interaction.followUp({ content: 'Permissões atualizadas.', ephemeral: true });
-    return true;
-  }
-  return false;
 }
 
 async function showDmModal(interaction, target, cfg) {

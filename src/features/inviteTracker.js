@@ -59,7 +59,7 @@ async function handleAntiReentryToggle(interaction, ctx) {
   return renderHome(interaction, merged, { type: 'success', message: `Anti reentrada ${next ? 'ativado' : 'desativado'}.` });
 }
 
-  client.once('ready', async () => {
+  client.once('clientReady', async () => {
     const prisma = getPrisma();
     await refreshRuntimeState(prisma);
     await bootstrapInviteCache();
