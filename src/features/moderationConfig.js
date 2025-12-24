@@ -159,10 +159,22 @@ async function handleInteraction(interaction, ctx) {
 }
 
 async function handleButton(interaction, prisma) {
-  // Evitar timeout e seguir a filosofia de painel único
-  await interaction.deferUpdate().catch(() => {});
   const id = interaction.customId;
   const cfg = await ensureModerationConfig(prisma);
+
+  // Ações que precisam abrir modal NÃO podem ser deferidas antes do showModal
+  if (id === 'moderation:ban:dm:message' || id === 'moderation:castigo:dm:message') {
+    const target = id.includes('ban') ? 'ban' : 'castigo';
+    return showDmModal(interaction, target, cfg);
+  }
+
+  if (id === 'moderation:ban:dm:contact' || id === 'moderation:castigo:dm:contact') {
+    const target = id.includes('ban') ? 'ban' : 'castigo';
+    return showContactModal(interaction, target, cfg);
+  }
+
+  // Demais ações podem ser deferidas para evitar timeout e manter painel único
+  await interaction.deferUpdate().catch(() => {});
 
   if (id === 'moderation:back:root') {
     const embed = buildSummaryEmbed(cfg, interaction.guild);
@@ -262,16 +274,6 @@ async function handleButton(interaction, prisma) {
   if (id === 'moderation:castigo:dm:back') {
     await safeUpdate(interaction, { embeds: [buildCastigoEmbed(cfg)], components: castigoComponents() });
     return true;
-  }
-
-  if (id === 'moderation:ban:dm:message' || id === 'moderation:castigo:dm:message') {
-    const target = id.includes('ban') ? 'ban' : 'castigo';
-    return showDmModal(interaction, target, cfg);
-  }
-
-  if (id === 'moderation:ban:dm:contact' || id === 'moderation:castigo:dm:contact') {
-    const target = id.includes('ban') ? 'ban' : 'castigo';
-    return showContactModal(interaction, target, cfg);
   }
 
   if (id === 'moderation:ban:dm:clearcontact' || id === 'moderation:castigo:dm:clearcontact') {
