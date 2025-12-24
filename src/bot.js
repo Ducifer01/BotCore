@@ -25,6 +25,9 @@ const muteCommands = require('./features/muteCommands');
 const inviteTrackerFeature = require('./features/inviteTracker');
 const channelCleanerFeature = require('./features/channelCleaner');
 const userStatsFeature = require('./features/userStats');
+const pointsSystem = require('./features/pointsSystem');
+const pointsInteractions = require('./features/pointsInteractions');
+const pointsConfigFeature = require('./features/pointsConfig');
 const { ALLOWED_GUILD_IDS, isGuildAllowed } = require('./config');
 
 const client = new Client({ intents: [
@@ -64,6 +67,12 @@ try {
 }
 
 try {
+  pointsSystem.register(client);
+} catch (e) {
+  console.warn('[init] Sistema de pontos não carregado:', e?.message || e);
+}
+
+try {
   channelCleanerFeature.registerChannelCleaner(client);
 } catch (e) {
   console.warn('[init] Channel cleaner não carregado:', e?.message || e);
@@ -79,6 +88,7 @@ const menuHandler = createMenuHandler({
   cleaner: { presentMenu: channelCleanerFeature.presentMenu },
   permissions: { presentMenu: commandPermissionsFeature.presentMenu },
   audit: { presentMenu: auditConfig.presentMenu },
+  points: { presentMenu: pointsConfigFeature.presentMenu },
 });
 
 const interactionFeatures = [
@@ -97,10 +107,12 @@ const interactionFeatures = [
   auditConfig,
   inviteTrackerFeature,
   channelCleanerFeature,
+  pointsInteractions,
+  pointsConfigFeature,
   { handleInteraction: handleSupportInteraction },
 ];
 
-const messageFeatures = [userStatsFeature, autoModFeature, roleEditorFeature, instaFeature, moderationCommands, muteCommands];
+const messageFeatures = [pointsSystem, userStatsFeature, autoModFeature, roleEditorFeature, instaFeature, moderationCommands, muteCommands];
 const guildUpdateFeatures = [instaFeature];
 
 function buildHandlerContext() {
@@ -248,11 +260,25 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
   }
 });
 
+client.on('guildMemberRemove', async (member) => {
+  try {
+    if (!isGuildAllowed(member.guild.id)) return;
+    if (typeof pointsSystem.handleGuildMemberRemove === 'function') {
+      await pointsSystem.handleGuildMemberRemove(member);
+    }
+  } catch (err) {
+    console.error(err);
+  }
+});
+
 client.on('voiceStateUpdate', async (oldState, newState) => {
   try {
     const guildId = newState.guild?.id || oldState.guild?.id;
     if (!guildId || !isGuildAllowed(guildId)) return;
     const ctx = buildHandlerContext();
+    if (typeof pointsSystem.handleVoiceStateUpdate === 'function') {
+      await pointsSystem.handleVoiceStateUpdate(oldState, newState, ctx);
+    }
     if (typeof userStatsFeature.handleVoiceStateUpdate === 'function') {
       await userStatsFeature.handleVoiceStateUpdate(oldState, newState, ctx);
     }

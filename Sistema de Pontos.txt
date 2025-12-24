@@ -1,44 +1,51 @@
 MODOS:
-Modo global: Todos participam.
-Modo seletivo: Apenas pessoas com {cargo_participante} irá ser considerados.
+Modo global (padrão): Todos participam.
+Modo seletivo: Apenas pessoas com {cargo_participante} (qualquer um dos cargos listados já habilita a participação).
 
 ATENÇÃO:
 Bots não participam do sistema de pontos, independentemente do modo ativo.
 
 
 Variaveis:
-{cargo_participante} = Cargo ou lista de cargos que são necessário para poder participar do sistema, caso o Modo seletivo esteja ativado.
+{cargo_participante} = Cargo ou lista de cargos necessários para poder participar do sistema, caso o Modo seletivo esteja ativado (basta ter um dos cargos).
 {cargos_ignorados} = Lista de cargos que não participarão do sistema.
 {pessoas_ignoradas} = Lista de ids de usuários que não participarão do sistema.
-{tempo_call} = Quantidade de tempo em minutos para o usuário poder ganhar os {pontos_call} DEFAULT: 5
-{pontos_call} = quantidade de pontos que ganha a cada {tempo_call} tempo.
-{pontos_chat} = Cada mensagem válida → +{pontos_chat} Limitado por cooldown e limite diário (respeitando as regras)
-{canais_chat} = Lista de canais onde o sistema de pontos funcionará. OBS: A pontuação de chat é global por usuário, não por canal.
-Enviar mensagens simultâneas em canais diferentes não gera pontos extras.
-{qtd_caracteres} = Quantidade de caracteres mínimo que deve ter em cada mensagem enviada. DEFAULT = 20
-{cooldown_chat} = cooldown em minutos entre mensagens. DEFAULT: 2
+{tempo_call} = Quantidade de tempo em minutos para o usuário poder ganhar os {pontos_call}. DEFAULT: 5
+{pontos_call} = Quantidade de pontos que ganha a cada bloco completo de {tempo_call}. DEFAULT: 5
+{pontos_chat} = Cada mensagem válida → +{pontos_chat}. Limitado por cooldown e (opcionalmente) limite diário. DEFAULT: 2
+{canais_chat} = Lista de canais onde o sistema de pontos funcionará. OBS: A pontuação de chat é global por usuário, não por canal. Enviar mensagens simultâneas em canais diferentes não gera pontos extras.
+{qtd_caracteres} = Quantidade de caracteres mínimo que deve ter em cada mensagem enviada. DEFAULT: 20
+{cooldown_chat} = Cooldown em minutos entre mensagens válidas. DEFAULT: 2 (só inicia após uma mensagem válida contar).
+{limite_diario_chat} = Limite diário opcional de pontos por chat. Por padrão DESATIVADO (sem limite). Deve poder ser ligado/desligado.
 {tempo_server} = Quantidade em horas que uma conta deve permanecer no servidor para contabilizar o convite. DEFAULT: 24
 {idade_conta} = Idade mínima (em dias) da conta que entrou pelo convite. DEFAULT: 7
-{min_user_call} = Quantidade de usuários que devem estar em call para poder contabilizar os pontos. Se for zero ou 1, significa que não existe quantidade minima. Se for 2 ou mais, o valor será a quantidade mínima. #DEFAULT: 2
-{dias_convite} = Quantidade em dias que um usuário deve permanecer no servidor, caso ele saia, a pessoa que ganhou os pontos de convite deve ter esses mesmos pontos subtraidos.
+{min_user_call} = Quantidade de usuários que devem estar em call para poder contabilizar os pontos. Se for zero ou 1, significa que não existe quantidade mínima. Se for 2 ou mais, o valor será a quantidade mínima. DEFAULT: 0
+{dias_convite} = Quantidade em dias que um usuário deve permanecer no servidor; se sair antes, os pontos de convite do convidador devem ser subtraídos (clamp em 0).
+{pontos_convites} = Pontos ganhos por convite válido. DEFAULT: 50
+{canal_logs_admin} = Canal para logs administrativos.
+{canal_logs_usuarios} = Canal para logs de transparência aos usuários.
 _______________________________________________
 Regras de pontos no chat:
 Usuário ganha pontos ao mandar mensagens nos canais {canais_chat}, porém, as mensagens devem passar pelas regras abaixo para serem válidas.
 1. Só nos canais {canais_chat}.
-2. Mensagens devem ter ao menos {qtd_caracteres} caracteres
-3. não podem repetir a anterior.
-4. Cooldown por usuário. O tempo será definido pela variavel {cooldown_chat}
-Resultado: Após passar pelas regras, usuário ganha {pontos_chat}
+2. Mensagens devem ter ao menos {qtd_caracteres} caracteres.
+3. Não podem repetir a anterior.
+4. Cooldown por usuário. O tempo será definido pela variável {cooldown_chat}. O cooldown só começa depois que uma mensagem válida foi contabilizada.
+5. Limite diário opcional ({limite_diario_chat}); quando desligado, não há limite.
+6. Mensagens editadas não contam; apenas novas mensagens.
+Resultado: Após passar pelas regras, usuário ganha {pontos_chat} (respeitando cooldown e eventual limite diário).
 _______________________________________________
 Regras de pontos em call:
-Usuário ganha {pontos_call} a cada {tempo_call} que passar em call. Porém, ele deve seguir as regras abaixo.
+Usuário ganha {pontos_call} apenas ao completar blocos discretos de {tempo_call} minutos. Ex.: {tempo_call}=5, ficou 7 minutos → recebe 1 bloco.
 Regra: Só contabiliza tempo em call se houver no mínimo {min_user_call} usuários ativos.
-Usuários mutados não recebem pontos.
+Usuários mutados ou surdos/deafened não recebem pontos.
 _______________________________________________
 Regras convites:
 A pessoa convidada deve ficar ao menos {tempo_server} para contabilizar.
 A pessoa convidada deve ter uma conta com mais de {idade_conta} dias para contabilizar.
-Convites não contam se o usuário sair do servidor antes de {dias_convite} dias após a contabilização. Por tanto, se o usuário sair nesse tempo. Deve ser descontado e registrado em log.
+Convites não contam se o usuário sair do servidor antes de {dias_convite} dias após a contabilização. Portanto, se o usuário sair nesse tempo, deve ser descontado (clampando saldo mínimo em 0) e registrado em log.
+Pontos ganhos por convite válido: {pontos_convites} (default 50).
+Inválidos/expirados devem gerar log de expiração.
 
 _______________________________________________
 Comandos:
@@ -46,8 +53,10 @@ Comandos:
 /adicionar_pontos -> usuario + pontos
 /remover_pontos -> usuario + pontos
 /resetar_pontos -> pede confirmação com embed.
-/punir -> id/menção, dias, motivo. | Congela o usuário, ele não ganhará mais pontos por x dias. Se dias for = 0. Portanto, punição será permanentemente.
+/punir -> id/menção, dias, motivo. | Congela o usuário, ele não ganhará mais pontos por x dias. Se dias for = 0, punição permanente.
+/despunir -> remove a punição de um usuário (volta a ganhar pontos). Punição não bloqueia descontos automáticos (ex.: convites inválidos).
 /rank Exibe o top 10 em mensagem ephemeral.
+Painel/leaderboard: Top 20, desempate por conta mais antiga no servidor. Deve haver painel único, atualizado automaticamente pelo bot a cada X tempo e com timestamp nativo do Discord ("Painel atualizará em X tempo").
 
 _______________________________________________
 Logs:
@@ -69,6 +78,7 @@ Usuário afetado (ID e menção)
 Quantidade de pontos adicionados ou removidos
 Motivo da ação
 Origem da ação (Admin / Sistema)
+Executor (quem realizou a ação), quando aplicável
 Data e hora
 Em formato de embed.
 
@@ -90,5 +100,7 @@ A configuração será no /menu.
 Ativar/Desativar sistema.
 Opções adequadas para Configurar todas variaveis citadas aqui.
 Navegação no /menu seguindo lógica de fluxo já existente.
-
-Em /menu deve ter também uma opção para gerar e enviar painel em um canal especificado, esse painel será basicamente um leaderboard com nome e respectivos pontos dos top 20.
+Usar painel único já existente, integrando via select menus/autocomplete conforme padrão atual.
+Permitir ativar/desativar subsistemas (chat/call/convites) setando valores em 0.
+Em /menu deve ter também uma opção para gerar e enviar painel em um canal especificado, esse painel será um leaderboard top 20 (nome + pontos), com atualização automática periódica e timestamp.
+Banco deve usar bigint para saldos/valores. Reset geral zera saldo, mas mantém histórico (PointTransaction, convites, punições, logs) por transparência.

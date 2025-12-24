@@ -9,6 +9,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+
 // Configuração 100% global: eliminar distinções por guild
 model GlobalConfig {
   id                     Int      @id @default(autoincrement())
@@ -61,8 +62,211 @@ model GlobalConfig {
   voiceMutes           VoiceMute[]
   chatMutes            ChatMute[]
   antiSpamConfig       AntiSpamConfig?
+  // Sistema de pontos
+  pointsConfig         PointsConfig?
+  pointsLeaderboardPanels PointsLeaderboardPanel[]
+  pointBalances        PointsBalance[]
+  pointTransactions    PointsTransaction[]
+  pointPunishments     PointsPunishment[]
+  pointInvites         PointsInviteLedger[]
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
+}
+
+model PointsConfig {
+  id                         Int       @id @default(autoincrement())
+  globalConfigId             Int       @unique
+  enabled                    Boolean   @default(false)
+  mode                       String    @default("GLOBAL")
+  pontosChat                 BigInt    @default(2)
+  pontosCall                 BigInt    @default(5)
+  pontosConvites             BigInt    @default(50)
+  cooldownChatMinutes        Int       @default(2)
+  limitDailyChat             BigInt?
+  tempoCallMinutes           Int       @default(5)
+  tempoServerHours           Int       @default(24)
+  idadeContaDias             Int       @default(7)
+  minUserCall                Int       @default(0)
+  diasConvite                Int       @default(7)
+  qtdCaracteresMin           Int       @default(20)
+  logsAdminChannelId         String?
+  logsUsuariosChannelId      String?
+  leaderboardRefreshMinutes  Int       @default(10)
+  leaderboardLastRefresh     DateTime?
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
+  globalConfig               GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
+  participantRoles           PointsParticipantRole[]
+  ignoredRoles               PointsIgnoredRole[]
+  ignoredUsers               PointsIgnoredUser[]
+  chatChannels               PointsChatChannel[]
+  leaderboardPanels          PointsLeaderboardPanel[]
+}
+
+model PointsParticipantRole {
+  id             Int          @id @default(autoincrement())
+  pointsConfigId Int
+  roleId         String
+  config         PointsConfig @relation(fields: [pointsConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([pointsConfigId, roleId])
+}
+
+model PointsIgnoredRole {
+  id             Int          @id @default(autoincrement())
+  pointsConfigId Int
+  roleId         String
+  config         PointsConfig @relation(fields: [pointsConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([pointsConfigId, roleId])
+}
+
+model PointsIgnoredUser {
+  id             Int          @id @default(autoincrement())
+  pointsConfigId Int
+  userId         String
+  config         PointsConfig @relation(fields: [pointsConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([pointsConfigId, userId])
+}
+
+model PointsChatChannel {
+  id             Int          @id @default(autoincrement())
+  pointsConfigId Int
+  channelId      String
+  guildId        String
+  config         PointsConfig @relation(fields: [pointsConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([pointsConfigId, channelId])
+  @@index([guildId])
+}
+
+model PointsBalance {
+  id             Int       @id @default(autoincrement())
+  globalConfigId Int
+  guildId        String
+  userId         String
+  points         BigInt    @default(0)
+  frozenUntil    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  config         GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
+  transactions   PointsTransaction[]
+  punishments    PointsPunishment[]
+  chatActivity   PointsChatActivity?
+  voiceSession   PointsVoiceSession?
+
+  @@unique([globalConfigId, guildId, userId])
+  @@index([guildId, userId])
+}
+
+model PointsChatActivity {
+  id             Int          @id @default(autoincrement())
+  globalConfigId Int
+  guildId        String
+  userId         String
+  lastMessageAt  DateTime?
+  lastMessageHash String?
+  dailyPoints    BigInt       @default(0)
+  dailyDate      DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  balance        PointsBalance @relation(fields: [globalConfigId, guildId, userId], references: [globalConfigId, guildId, userId], onDelete: Cascade)
+
+  @@unique([globalConfigId, guildId, userId])
+  @@index([guildId, userId])
+}
+
+model PointsVoiceSession {
+  id             Int          @id @default(autoincrement())
+  globalConfigId Int
+  guildId        String
+  userId         String
+  channelId      String?
+  startedAt      DateTime?
+  accumulatedSeconds Int      @default(0)
+  lastCheckedAt  DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  balance        PointsBalance @relation(fields: [globalConfigId, guildId, userId], references: [globalConfigId, guildId, userId], onDelete: Cascade)
+
+  @@unique([globalConfigId, guildId, userId])
+  @@index([guildId, userId])
+}
+
+model PointsTransaction {
+  id             Int            @id @default(autoincrement())
+  globalConfigId Int
+  guildId        String
+  userId         String
+  type           String
+  source         String         @default("SYSTEM")
+  amount         BigInt
+  reason         String?
+  actorId        String?
+  metadata       String?
+  createdAt      DateTime       @default(now())
+  config         GlobalConfig   @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
+  balance        PointsBalance? @relation(fields: [globalConfigId, guildId, userId], references: [globalConfigId, guildId, userId])
+
+  @@index([guildId, userId, createdAt])
+}
+
+model PointsPunishment {
+  id             Int          @id @default(autoincrement())
+  globalConfigId Int
+  guildId        String
+  userId         String
+  moderatorId    String?
+  reason         String?
+  expiresAt      DateTime?
+  liftedAt       DateTime?
+  commandChannelId String?
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  config         GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
+  balance        PointsBalance? @relation(fields: [globalConfigId, guildId, userId], references: [globalConfigId, guildId, userId])
+
+  @@index([guildId, userId, active])
+  @@index([expiresAt])
+}
+
+model PointsInviteLedger {
+  id             Int          @id @default(autoincrement())
+  globalConfigId Int
+  guildId        String
+  inviterId      String
+  inviteeId      String
+  invitedAt      DateTime     @default(now())
+  confirmedAt    DateTime?
+  pointsAwarded  BigInt       @default(0)
+  revokedAt      DateTime?
+  revokedReason  String?
+  status         String       @default("PENDING")
+  config         GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
+
+  @@index([guildId, inviterId])
+  @@unique([guildId, inviteeId])
+}
+
+model PointsLeaderboardPanel {
+  id             Int          @id @default(autoincrement())
+  globalConfigId Int
+  pointsConfigId Int?
+  guildId        String
+  channelId      String
+  messageId      String?
+  refreshMinutes Int          @default(10)
+  lastRefreshAt  DateTime?
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  config         GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
+  pointsConfig   PointsConfig? @relation(fields: [pointsConfigId], references: [id], onDelete: Cascade)
+
+  @@index([guildId, isActive])
+  @@unique([guildId, channelId, messageId])
 }
 
 model TicketPingRoleGlobal {

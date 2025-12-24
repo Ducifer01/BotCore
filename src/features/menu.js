@@ -21,10 +21,11 @@ function buildRootSelect() {
       { label: 'Configurar Limpeza', value: 'cleaner', description: 'Painéis para limpar mensagens automaticamente' },
       { label: 'Configurar Permissões', value: 'permissions', description: 'Defina quais cargos acessam cada comando' },
       { label: 'Configurar Auditoria', value: 'audit', description: 'Configure logs de auditoria' },
+      { label: 'Configurar Pontos', value: 'points', description: 'Sistema de pontos (chat/call/convites)' },
     ]);
 }
 
-function createMenuHandler({ insta, mute, support, automod, moderation, invites, cleaner, permissions, audit }) {
+function createMenuHandler({ insta, mute, support, automod, moderation, invites, cleaner, permissions, audit, points }) {
   async function handleInteraction(interaction, ctx) {
     if (interaction.isStringSelectMenu() && interaction.customId === 'menu:root') {
       return handleRootSelection(interaction, ctx);
@@ -68,6 +69,9 @@ function createMenuHandler({ insta, mute, support, automod, moderation, invites,
     }
     if (choice === 'audit') {
       return audit.presentMenu(interaction, ctx);
+    }
+    if (choice === 'points') {
+      return points.presentMenu(interaction, ctx);
     }
     return false;
   }

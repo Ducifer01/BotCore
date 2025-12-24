@@ -11,6 +11,7 @@ const {
 } = require('discord.js');
 const { getGlobalConfig, ensureGlobalConfig } = require('../services/globalConfig');
 const { getPrisma } = require('../db');
+const { getPointsConfig, handleInviteJoin: handlePointsInviteJoin } = require('../services/points');
 
 const PAGE_SIZE = 50;
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
@@ -636,6 +637,27 @@ async function handleMemberJoin(member) {
     minDays,
     totalUses,
   });
+
+  // Integração com sistema de pontos (convites)
+  if (meetsFilter && inviterId) {
+    try {
+      const pointsCfg = await getPointsConfig(prisma);
+      if (pointsCfg?.enabled) {
+        const accountAgeDays = createdAt ? (Date.now() - createdAt) / DAY_MS : Number.MAX_SAFE_INTEGER;
+        await handlePointsInviteJoin({
+          guildId: guild.id,
+          inviterId,
+          inviteeId: member.id,
+          invitedAt: new Date(),
+          accountAgeDays,
+          prisma,
+          cfg: pointsCfg,
+        });
+      }
+    } catch (err) {
+      console.warn('[invites->points] falha ao registrar convite:', err?.message || err);
+    }
+  }
 
   if (meetsFilter && runtime.enabled) {
     await enqueueRankingRefresh('member-join');
