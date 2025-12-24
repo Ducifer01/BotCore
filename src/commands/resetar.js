@@ -29,9 +29,9 @@ module.exports = {
       .setDescription('Isso vai anunciar o ganhador da semana e limpar todos os posts de InstaBoy/InstaGirl. Deseja continuar?')
       .setColor(0xE74C3C);
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`menu:insta:reset:confirm:${interaction.user.id}:sc`).setLabel('Sim, resetar').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId('menu:insta:reset:cancel').setLabel('Cancelar').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`menu:insta:reset:confirm:${interaction.user.id}:slash`).setLabel('Sim, resetar').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('menu:insta:reset:cancel:slash').setLabel('Cancelar').setStyle(ButtonStyle.Secondary),
     );
-    await interaction.reply({ embeds: [embed], components: [row] });
+    await interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
   },
 };

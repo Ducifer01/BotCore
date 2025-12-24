@@ -376,16 +376,32 @@ async function handleConfigButtons(interaction, ctx) {
   }
   if (action === 'reset') {
     if (subaction === 'cancel') {
+      // Se origem for slash (/resetar), apenas toast ephemeral e desabilitar botões
+      if (parts[4] === 'slash') {
+        await interaction.deferUpdate().catch(() => {});
+        const disabledRow = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId('menu:insta:reset:confirm:disabled').setLabel('Sim, resetar').setStyle(ButtonStyle.Danger).setDisabled(true),
+          new ButtonBuilder().setCustomId('menu:insta:reset:cancel:disabled').setLabel('Cancelar').setStyle(ButtonStyle.Secondary).setDisabled(true),
+        );
+        await interaction.editReply({ components: [disabledRow] }).catch(() => {});
+        await interaction.followUp({ content: 'Reset cancelado.', ephemeral: true }).catch(() => {});
+        return true;
+      }
       return renderHome(interaction, prisma, { type: 'info', message: 'Reset cancelado.' });
     }
     if (subaction === 'confirm') {
       const ownerId = parts[4];
-      const origin = parts[5] || 'panel';
+      const originTag = parts[5] || 'panel';
       if (ownerId && ownerId !== interaction.user.id) {
         await interaction.followUp({ content: 'Apenas quem solicitou pode confirmar.', ephemeral: true }).catch(() => {});
         return true;
       }
-      return performInstaReset(interaction, prisma, { mode: origin === 'sc' ? 'slash' : 'panel' });
+      if (originTag === 'slash') {
+        await interaction.deferUpdate().catch(() => {});
+        await performInstaReset(interaction, prisma, { mode: 'slash' });
+        return true;
+      }
+      return performInstaReset(interaction, prisma);
     }
     return showResetConfirm(interaction);
   }

@@ -3,9 +3,33 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('
 const awaitingRoleEdit = new Map(); // Map<userId, { roleId, type, channelId }>
 
 async function handleInteraction(interaction) {
-  if (!interaction.isButton()) return false;
   const customId = interaction.customId;
-  if (!customId.startsWith('role-edit:')) return false;
+  if (!customId || !customId.startsWith('role-edit:')) return false;
+  // Select de cargo
+  if (interaction.isRoleSelectMenu()) {
+    const action = customId.split(':')[1];
+    if (action !== 'select') return false;
+    await interaction.deferUpdate().catch(() => {});
+    const roleId = interaction.values?.[0];
+    if (!roleId) {
+      await interaction.followUp({ content: 'Seleção inválida.', ephemeral: true }).catch(() => {});
+      return true;
+    }
+    const role = interaction.guild.roles.cache.get(roleId) || await interaction.guild.roles.fetch(roleId).catch(() => null);
+    if (!role) {
+      await interaction.followUp({ content: 'Cargo não encontrado.', ephemeral: true }).catch(() => {});
+      return true;
+    }
+    const embed = new EmbedBuilder().setTitle(`Editar cargo: ${role.name}`).setDescription('Escolha o que deseja editar. Obs: Apenas ações de quem iniciou serão aceitas.');
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`role-edit:name:${role.id}`).setLabel('Editar nome').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`role-edit:emoji:${role.id}`).setLabel('Editar emoji').setStyle(ButtonStyle.Secondary),
+    );
+    await interaction.editReply({ embeds: [embed], components: [row] }).catch(() => {});
+    return true;
+  }
+  // Botões
+  if (!interaction.isButton()) return false;
   const [, action, roleId] = customId.split(':');
   if (!roleId) {
     await interaction.reply({ content: 'Requisição inválida.', ephemeral: true });
