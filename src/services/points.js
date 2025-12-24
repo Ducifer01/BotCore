@@ -326,9 +326,10 @@ async function handleInviteJoin({ guildId, inviterId, inviteeId, invitedAt, acco
   if (!inviterId || !inviteeId || inviterId === inviteeId) return;
   const globalConfigId = cfg.globalConfigId || cfg.id;
   const idadeMin = cfg.idadeContaDias || 0;
-  // Se já foi confirmado alguma vez, nunca paga novamente (anti-farm)
+  const antiReentry = cfg.inviteAntiReentryEnabled !== false;
+  // Se já foi confirmado alguma vez, nunca paga novamente (anti-farm) quando habilitado
   const existing = await prisma.pointsInviteLedger.findUnique({ where: { guildId_inviteeId: { guildId, inviteeId } } });
-  if (existing?.confirmedAt) {
+  if (antiReentry && existing?.confirmedAt) {
     return; // já confirmou no passado, não gera pendência nem nova premiação
   }
   const tempoServerHours = cfg.tempoServerHours || 0;

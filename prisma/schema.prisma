@@ -95,6 +95,7 @@ model PointsConfig {
   leaderboardLastRefresh     DateTime?
   createdAt                  DateTime  @default(now())
   updatedAt                  DateTime  @updatedAt
+  inviteAntiReentryEnabled   Boolean   @default(true)
   globalConfig               GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
   participantRoles           PointsParticipantRole[]
   ignoredRoles               PointsIgnoredRole[]

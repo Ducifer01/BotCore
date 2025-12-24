@@ -11,7 +11,7 @@ const {
 } = require('discord.js');
 const { getGlobalConfig, ensureGlobalConfig } = require('../services/globalConfig');
 const { getPrisma } = require('../db');
-const { getPointsConfig, handleInviteJoin: handlePointsInviteJoin, handleInviteLeave: handlePointsInviteLeave } = require('../services/points');
+const { getPointsConfig, ensurePointsConfig, handleInviteJoin: handlePointsInviteJoin, handleInviteLeave: handlePointsInviteLeave } = require('../services/points');
 
 const PAGE_SIZE = 50;
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
@@ -45,6 +45,19 @@ function registerInviteTracker(client, { isGuildAllowed } = {}) {
   if (typeof isGuildAllowed === 'function') {
     isGuildAllowedFn = isGuildAllowed;
   }
+
+async function handleAntiReentryToggle(interaction, ctx) {
+  const prisma = ctx.getPrisma();
+  await ensurePointsConfig(prisma);
+  const pointsCfg = await getPointsConfig(prisma);
+  const next = !(pointsCfg?.inviteAntiReentryEnabled !== false);
+  await prisma.pointsConfig.update({ where: { id: pointsCfg.id }, data: { inviteAntiReentryEnabled: next } });
+  const updatedPointsCfg = await getPointsConfig(prisma);
+  // Re-render home with merged config to reflect toggle
+  const cfg = (await getGlobalConfig(prisma)) || (await ensureGlobalConfig(prisma));
+  const merged = { ...cfg, inviteAntiReentryEnabled: updatedPointsCfg?.inviteAntiReentryEnabled };
+  return renderHome(interaction, merged, { type: 'success', message: `Anti reentrada ${next ? 'ativado' : 'desativado'}.` });
+}
 
   client.once('ready', async () => {
     const prisma = getPrisma();
@@ -232,6 +245,10 @@ async function handleMenuButtons(interaction, ctx) {
     return showFilterDaysModal(interaction, cfg);
   }
 
+  if (action === 'antireentry') {
+    return handleAntiReentryToggle(interaction, ctx);
+  }
+
   if (action === 'resetconfirm') {
     await performReset(interaction, prisma, cfg);
     return true;
@@ -292,7 +309,10 @@ async function handleRankingButtons(interaction) {
   const state = rankingViewState.get(messageId) || { page: 1, totalPages: 1 };
 
   if (customId === 'inviteRank:prev') {
-    state.page = Math.max(1, state.page - 1);
+    state.page = Math.max(1, state.page - 1); // No-op change
+    if (interaction.customId === 'menu:invite:antireentry') {
+      return handleAntiReentryToggle(interaction, ctx);
+    }
   } else if (customId === 'inviteRank:next') {
     state.page = Math.min(state.totalPages, state.page + 1);
   }
@@ -339,10 +359,12 @@ async function ensurePosse(interaction, ctx) {
 
 async function renderHome(interaction, cfg, status) {
   const prisma = getPrisma();
+  const pointsCfg = await getPointsConfig(prisma);
+  const merged = { ...cfg, inviteAntiReentryEnabled: pointsCfg?.inviteAntiReentryEnabled }; // merge info from pontos
   const guildId = cfg.inviteRankingGuildId || interaction.guildId;
   const totalStats = await prisma.inviteStat.count({ where: guildId ? { guildId } : {} });
-  const embed = buildInviteEmbed(cfg, totalStats, status);
-  await interaction.editReply({ embeds: [embed], components: buildHomeComponents(cfg) }).catch(() => {});
+  const embed = buildInviteEmbed(merged, totalStats, status);
+  await interaction.editReply({ embeds: [embed], components: buildHomeComponents(merged) }).catch(() => {});
   return true;
 }
 
@@ -355,6 +377,7 @@ function resolveRankingEnabled(cfg) {
 
 function buildInviteEmbed(cfg, totalStats, status) {
   const rankingEnabled = resolveRankingEnabled(cfg);
+  const antiReentry = cfg.inviteAntiReentryEnabled !== false;
   const lines = [];
   lines.push(`Status: **${rankingEnabled ? 'Ativo' : 'Inativo'}**`);
   lines.push(`Canal: ${cfg.inviteRankingChannelId ? `<#${cfg.inviteRankingChannelId}>` : 'não definido'}`);
@@ -364,6 +387,7 @@ function buildInviteEmbed(cfg, totalStats, status) {
     ? `Ativo (≥ ${cfg.inviteAccountAgeMinDays || 0} dias)`
     : 'Inativo';
   lines.push(`Filtro conta: ${filterStatus}`);
+  lines.push(`Anti reentrada: **${antiReentry ? 'Ativo' : 'Inativo'}**`);
   const nextText = rankingEnabled && nextRefreshAt
     ? formatRelative(nextRefreshAt)
     : 'quando o sistema estiver ativo';
@@ -379,6 +403,7 @@ function buildHomeComponents(cfg) {
   const rankingEnabled = resolveRankingEnabled(cfg);
   const toggleLabel = rankingEnabled ? 'Desativar Sistema' : 'Ativar Sistema';
   const toggleStyle = rankingEnabled ? ButtonStyle.Danger : ButtonStyle.Success;
+  const antiReentry = cfg.inviteAntiReentryEnabled !== false;
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('menu:back').setLabel('Voltar').setStyle(ButtonStyle.Secondary),
@@ -389,6 +414,7 @@ function buildHomeComponents(cfg) {
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('menu:invite:log').setLabel('Canal de Log').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('menu:invite:filter').setLabel('Filtro de Contas').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('menu:invite:antireentry').setLabel(antiReentry ? 'Anti reentrada: ON' : 'Anti reentrada: OFF').setStyle(antiReentry ? ButtonStyle.Success : ButtonStyle.Secondary),
     ),
   ];
 }
