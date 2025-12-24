@@ -153,7 +153,6 @@ const COMMAND_HANDLERS = {
   ping: handlePingCommand,
   info: handleInfoCommand,
   remover_verificado: handleRemoveVerifiedCommand,
-  verificado: handleVerificadoCommand,
 };
 
 const pingCooldowns = new Map();
@@ -413,43 +412,6 @@ async function handleRemoveVerifiedCommand(message, args, prisma, posseId) {
       .setStyle(ButtonStyle.Secondary),
   );
   await message.channel.send({ content: `<@${message.author.id}>`, embeds: [embed], components: [row] });
-}
-
-async function handleVerificadoCommand(message, args, prisma, posseId) {
-  if (!message.guild) throw new Error('Este comando só funciona em servidores.');
-  if (!args.length) {
-    throw new CommandUsageError('Informe o usuário. ex: !verificado @usuario', 'verificado');
-  }
-  const targetId = extractId(args[0]);
-  if (!targetId) {
-    throw new CommandUsageError('Informe um usuário válido. ex: !verificado @usuario', 'verificado');
-  }
-  await assertCommandPermissionFromMenu(['verificado', 'verificação'], message.member, prisma, posseId);
-  const member = await message.guild.members.fetch(targetId).catch(() => null);
-  if (!member) {
-    throw new Error('Usuário não encontrado no servidor.');
-  }
-  const record = await prisma.verifiedUserGlobal.findUnique({ where: { userId: member.id } }).catch(() => null);
-  const embed = new EmbedBuilder()
-    .setTitle(member.user.username)
-    .setDescription(`Informações sobre o usuário ${member.user.username}`)
-    .addFields(
-      { name: 'Membro', value: `<@${member.id}> | ${member.id}`, inline: false },
-      { name: 'Status', value: record ? 'Verificado' : 'Não verificado', inline: false },
-      { name: 'Verificado por', value: record?.verifiedBy ? `<@${record.verifiedBy}> | ${record.verifiedBy}` : '—', inline: false },
-    )
-    .setThumbnail(member.displayAvatarURL({ size: 256 }))
-    .setColor(record ? 0x2ECC71 : 0xE74C3C);
-  if (record?.photoUrl) {
-    embed.setImage(record.photoUrl);
-  }
-  const sent = await message.channel.send({ embeds: [embed] });
-
-  // Apagar depois de 10 segundos
-  setTimeout(() => {
-    sent.delete().catch(() => {});
-  }, 10000);
-
 }
 
 module.exports = { handleMessage };

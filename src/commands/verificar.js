@@ -2,16 +2,12 @@ const { SlashCommandBuilder, AttachmentBuilder } = require('discord.js');
 const { getPrisma } = require('../db');
 const { getGlobalConfig } = require('../services/globalConfig');
 const { requireInstaConfig } = require('../services/instaGuard');
-const { applyVerifiedRole, extractUserIdFromThreadName, cacheThreadTargetUser } = require('../features/verify');
+const { applyVerifiedRole, extractUserIdFromThreadName, cacheThreadTargetUser, verifyThreads } = require('../features/verify');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('verificar')
     .setDescription('Concluir a verificação de um usuário dentro do tópico do verifique-se')
-    .addUserOption((opt) => opt
-      .setName('usuario')
-      .setDescription('Usuário a ser verificado')
-      .setRequired(true))
     .addStringOption((opt) => opt
       .setName('sexo')
       .setDescription('Sexo informado no momento da verificação')
@@ -42,12 +38,22 @@ module.exports = {
       return;
     }
 
-    const targetUser = interaction.options.getUser('usuario', true);
     const sex = interaction.options.getString('sexo', true);
     const attachment = interaction.options.getAttachment('imagem', true);
-    const threadUserId = extractUserIdFromThreadName(channel.name);
-    if (threadUserId && threadUserId !== targetUser.id) {
-      await interaction.reply({ content: `Este tópico pertence a <@${threadUserId}>. Escolha o usuário correspondente ou use o comando no tópico correto.`, ephemeral: true });
+    const cachedThread = verifyThreads.get(channel.id);
+    const inferredUserId = cachedThread?.targetUserId
+      || extractUserIdFromThreadName(channel.name)
+      || channel.ownerId
+      || null;
+    if (!inferredUserId) {
+      await interaction.reply({ content: 'Não consegui identificar o usuário deste tópico. Peça para a pessoa abrir um novo ticket.', ephemeral: true });
+      return;
+    }
+
+    const targetMember = await interaction.guild.members.fetch(inferredUserId).catch(() => null);
+    const targetUser = targetMember?.user || await interaction.client.users.fetch(inferredUserId).catch(() => null);
+    if (!targetUser) {
+      await interaction.reply({ content: 'Não consegui localizar o usuário deste tópico. Talvez ele tenha saído do servidor.', ephemeral: true });
       return;
     }
 
@@ -69,7 +75,7 @@ module.exports = {
 
     await interaction.deferReply({ ephemeral: false });
 
-    cacheThreadTargetUser(channel.id, targetUser.id);
+  cacheThreadTargetUser(channel.id, targetUser.id);
 
     let buffer;
     try {
@@ -87,8 +93,8 @@ module.exports = {
     const imageName = attachment.name || `verificacao-${Date.now()}.png`;
 
     const targetChannelId = sex === 'male'
-      ? (cfg.photosMaleChannelId || cfg.photosChannelId)
-      : (cfg.photosFemaleChannelId || cfg.photosChannelId);
+  ? (cfg.photosMaleChannelId || cfg.photosChannelId)
+  : (cfg.photosFemaleChannelId || cfg.photosChannelId);
     const photosChannel = targetChannelId
       ? await interaction.client.channels.fetch(targetChannelId).catch(() => null)
       : null;
@@ -99,7 +105,7 @@ module.exports = {
 
     const file = new AttachmentBuilder(buffer, { name: imageName });
     const content = [
-      `Usuario: <@${targetUser.id}> | ${targetUser.id}`,
+  `Usuario: <@${targetUser.id}> | ${targetUser.id}`,
       `Verificado por: <@${interaction.user.id}> | ${interaction.user.id}`,
       `Sexo: ${sex === 'male' ? 'Masculino' : 'Feminino'}`,
     ].join('\n');

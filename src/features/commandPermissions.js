@@ -23,11 +23,6 @@ const CUSTOM_IDS = {
 
 const STATIC_MANAGED_COMMANDS = [
   {
-    key: 'verificado',
-    label: '!verificado',
-    description: 'Mostra status de verificação do usuário informado.',
-  },
-  {
     key: 'remover_verificado',
     label: '!remover_verificado',
     description: 'Inicia o fluxo para remover a verificação de alguém.',
