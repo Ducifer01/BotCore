@@ -245,7 +245,7 @@ async function handleSelect(interaction, prisma) {
     if (!value) return invalidSelection(interaction);
     await prisma.globalConfig.update({ where: { id: cfg.id }, data: { muteVoiceRoleId: value } });
     await renderView(interaction, prisma, VOICE_VIEW);
-    await safeReply(interaction, { content: `Cargo mutado voz definido: <@&${value}>`, ephemeral: true });
+    //await safeReply(interaction, { content: `Cargo mutado voz definido: <@&${value}>`, ephemeral: true });
     return true;
   }
 
@@ -253,7 +253,7 @@ async function handleSelect(interaction, prisma) {
     if (!value) return invalidSelection(interaction);
     await prisma.globalConfig.update({ where: { id: cfg.id }, data: { muteVoiceUnlockChannelId: value } });
     await renderView(interaction, prisma, VOICE_VIEW);
-    await safeReply(interaction, { content: `Canal de desbloqueio definido: <#${value}>`, ephemeral: true });
+    //await safeReply(interaction, { content: `Canal de desbloqueio definido: <#${value}>`, ephemeral: true });
     return true;
   }
 
@@ -261,7 +261,7 @@ async function handleSelect(interaction, prisma) {
     if (!value) return invalidSelection(interaction);
     await prisma.globalConfig.update({ where: { id: cfg.id }, data: { muteVoiceLogChannelId: value } });
     await renderView(interaction, prisma, VOICE_VIEW);
-    await safeReply(interaction, { content: `Log de mute voz definido: <#${value}>`, ephemeral: true });
+    //await safeReply(interaction, { content: `Log de mute voz definido: <#${value}>`, ephemeral: true });
     return true;
   }
 
@@ -269,7 +269,7 @@ async function handleSelect(interaction, prisma) {
     if (!value) return invalidSelection(interaction);
     await prisma.globalConfig.update({ where: { id: cfg.id }, data: { muteChatRoleId: value } });
     await renderView(interaction, prisma, CHAT_VIEW);
-    await safeReply(interaction, { content: `Cargo mutado chat definido: <@&${value}>`, ephemeral: true });
+    //await safeReply(interaction, { content: `Cargo mutado chat definido: <@&${value}>`, ephemeral: true });
     return true;
   }
 
@@ -277,7 +277,7 @@ async function handleSelect(interaction, prisma) {
     if (!value) return invalidSelection(interaction);
     await prisma.globalConfig.update({ where: { id: cfg.id }, data: { muteChatLogChannelId: value } });
     await renderView(interaction, prisma, CHAT_VIEW);
-    await safeReply(interaction, { content: `Log de mute chat definido: <#${value}>`, ephemeral: true });
+    //await safeReply(interaction, { content: `Log de mute chat definido: <#${value}>`, ephemeral: true });
     return true;
   }
 
@@ -295,7 +295,7 @@ async function handleSelect(interaction, prisma) {
       }
     }
     await renderView(interaction, prisma, resolveViewFromCommand(commandType));
-    await safeReply(interaction, { content: 'Permissões atualizadas.', ephemeral: true });
+    //await safeReply(interaction, { content: 'Permissões atualizadas.', ephemeral: true });
     return true;
   }
 
