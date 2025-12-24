@@ -58,6 +58,7 @@ function buildHomeComponents(cfg) {
       new ButtonBuilder().setCustomId('menu:points:logs').setLabel('Canais de log').setStyle(ButtonStyle.Primary),
     ),
     new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('menu:points:rules').setLabel('Enviar Regras').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('menu:back').setLabel('Voltar').setStyle(ButtonStyle.Secondary),
     ),
   ];
@@ -101,6 +102,9 @@ async function handleInteraction(interaction, ctx) {
   if (interaction.isButton() && interaction.customId === 'menu:points:logs') {
     return promptLogs(interaction, ctx);
   }
+  if (interaction.isButton() && interaction.customId === 'menu:points:rules') {
+    return promptRulesChannel(interaction, ctx);
+  }
   if (interaction.isButton() && interaction.customId === 'menu:points:leaderboard') {
     return promptLeaderboard(interaction, ctx);
   }
@@ -121,6 +125,9 @@ async function handleInteraction(interaction, ctx) {
   }
   if (interaction.isChannelSelectMenu() && interaction.customId === 'menu:points:logs:user:set') {
     return saveLogChannel(interaction, ctx, 'user');
+  }
+  if (interaction.isChannelSelectMenu() && interaction.customId === 'menu:points:rules:channel') {
+    return sendRules(interaction, ctx);
   }
   if (interaction.isRoleSelectMenu()) {
     if (interaction.customId === 'menu:points:roles:set') return saveRoles(interaction, ctx, 'participant');
@@ -413,6 +420,75 @@ async function saveLogChannel(interaction, ctx, kind) {
   const updated = await pointsService.getPointsConfig(prisma);
   await interaction.editReply({ embeds: [buildEmbed(updated)], components: buildHomeComponents(updated) }).catch(() => {});
   return true;
+}
+
+async function promptRulesChannel(interaction, ctx) {
+  await interaction.deferUpdate().catch(() => {});
+  const prisma = ctx.getPrisma();
+  const cfg = await pointsService.getPointsConfig(prisma);
+  const select = new ChannelSelectMenuBuilder()
+    .setCustomId('menu:points:rules:channel')
+    .setPlaceholder('Escolha o canal para enviar as regras')
+    .setMinValues(1)
+    .setMaxValues(1)
+    .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement);
+  const backRow = buildBackRow();
+  await interaction
+    .editReply({ embeds: [buildEmbed(cfg)], components: [new ActionRowBuilder().addComponents(select), backRow] })
+    .catch(() => {});
+  return true;
+}
+
+async function sendRules(interaction, ctx) {
+  await interaction.deferUpdate().catch(() => {});
+  const prisma = ctx.getPrisma();
+  const cfg = await pointsService.getPointsConfig(prisma);
+  const channelId = interaction.values?.[0];
+  if (!channelId) {
+    await interaction.followUp({ content: 'Seleção inválida.', ephemeral: true }).catch(() => {});
+    return true;
+  }
+  const channel = await interaction.guild.channels.fetch(channelId).catch(() => null);
+  if (!channel || !channel.isTextBased()) {
+    await interaction.followUp({ content: 'Canal inválido para enviar regras.', ephemeral: true }).catch(() => {});
+    return true;
+  }
+
+  const embed = buildRulesEmbed(cfg, interaction.guild);
+  await channel.send({ embeds: [embed] }).catch(() => {});
+  await interaction.followUp({ content: `Regras enviadas em <#${channelId}>.`, ephemeral: true }).catch(() => {});
+  await interaction.editReply({ embeds: [buildEmbed(cfg)], components: buildHomeComponents(cfg) }).catch(() => {});
+  return true;
+}
+
+function buildRulesEmbed(cfg, guild) {
+  const modeLabel = cfg?.mode === 'SELECTIVE' ? 'Seletivo' : 'Global';
+  const participantRoles = cfg?.participantRoles?.length ? cfg.participantRoles.map((r) => `<@&${r}>`).join(', ') : 'Todos';
+
+  const lines = [
+    '**Sistema de pontos**',
+    `Status: ${cfg?.enabled ? 'Ativado' : 'Desativado'}`,
+    `Modo: ${modeLabel}`,
+    '',
+    '**Pontuações**',
+    `Chat: +${cfg?.pontosChat || 0} (cooldown ${cfg?.cooldownChatMinutes || 0} min, limite diário ${cfg?.limitDailyChat ?? 'desligado'})`,
+    `Call: +${cfg?.pontosCall || 0} a cada ${cfg?.tempoCallMinutes || 0} min (mín. usuários ${cfg?.minUserCall || 0})`,
+    `Convites: +${cfg?.pontosConvites || 0}`,
+    `Min. caracteres por mensagem: ${cfg?.qtdCaracteresMin || 0}`,
+    `Cargos que pontuam: ${participantRoles}`,
+    '',
+    '**Comandos úteis**',
+    '/pontos',
+    '/rank',
+    '/meus_convites',
+  ];
+
+  return new EmbedBuilder()
+    .setTitle('Regras do Sistema de Pontos')
+    .setDescription(lines.join('\n'))
+    .setColor(cfg?.enabled ? 0x2ecc71 : 0xe74c3c)
+    .setFooter({ text: guild?.name || 'Sistema de Pontos' })
+    .setTimestamp(new Date());
 }
 
 async function handleLeaderboardModal(interaction, ctx) {
