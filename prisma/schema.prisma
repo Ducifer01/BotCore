@@ -248,6 +248,7 @@ model PointsInviteLedger {
   config         GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
 
   @@index([guildId, inviterId])
+  @@index([status, invitedAt])
   @@unique([guildId, inviteeId])
 }
 

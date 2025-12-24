@@ -4,6 +4,9 @@ const { ChannelType, EmbedBuilder } = require('discord.js');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MINUTE_MS = 60 * 1000;
+const FROZEN_CACHE_TTL_MS = 60_000;
+
+const frozenCache = new Map(); // key: `${globalConfigId}:${guildId}:${userId}` -> { until: Date|null, at: number }
 
 function toBigInt(value) {
   if (typeof value === 'bigint') return value;
@@ -128,11 +131,9 @@ async function recordTransaction(prisma, cfg, { guildId, userId, amount, type, s
   const globalConfigId = cfg.globalConfigId || cfg.id;
   const delta = toBigInt(amount || 0n);
   const balance = await ensureBalance(prisma, cfg, guildId, userId);
-  const nextPoints = clampBigIntFloorZero(toBigInt(balance.points) + delta);
-  await prisma.pointsBalance.update({
-    where: { id: balance.id },
-    data: { points: nextPoints },
-  });
+  // Atualização atômica + clamp a zero para evitar perdas em concorrência
+  await prisma.$executeRaw`UPDATE "PointsBalance" SET "points" = MAX(0, "points" + ${delta}) WHERE "id" = ${balance.id}`;
+  const updated = await prisma.pointsBalance.findUnique({ where: { id: balance.id } });
   await prisma.pointsTransaction.create({
     data: {
       globalConfigId,
@@ -146,7 +147,7 @@ async function recordTransaction(prisma, cfg, { guildId, userId, amount, type, s
       metadata: metadata == null ? null : String(metadata),
     },
   });
-  return nextPoints;
+  return toBigInt(updated?.points || 0n);
 }
 
 async function setFrozen(prisma, cfg, { guildId, userId, expiresAt, reason, moderatorId, commandChannelId }) {
@@ -168,6 +169,7 @@ async function setFrozen(prisma, cfg, { guildId, userId, expiresAt, reason, mode
     where: { globalConfigId_guildId_userId: { globalConfigId, guildId, userId } },
     data: { frozenUntil: expiresAt || new Date(8640000000000000) },
   });
+  frozenCache.delete(`${globalConfigId}:${guildId}:${userId}`);
   return punishment;
 }
 
@@ -181,18 +183,33 @@ async function liftPunishment(prisma, cfg, { guildId, userId }) {
     where: { globalConfigId, guildId, userId },
     data: { frozenUntil: null },
   });
+  frozenCache.delete(`${globalConfigId}:${guildId}:${userId}`);
 }
 
 async function isFrozen(prisma, cfg, guildId, userId) {
   const globalConfigId = cfg.globalConfigId || cfg.id;
+  const cacheKey = `${globalConfigId}:${guildId}:${userId}`;
+  const nowTs = Date.now();
+  const cached = frozenCache.get(cacheKey);
+  if (cached && nowTs - cached.at < FROZEN_CACHE_TTL_MS) {
+    return cached.until ? cached.until > new Date() : false;
+  }
+
   const bal = await prisma.pointsBalance.findUnique({ where: { globalConfigId_guildId_userId: { globalConfigId, guildId, userId } } });
-  if (!bal?.frozenUntil) return false;
-  if (bal.frozenUntil && bal.frozenUntil > new Date()) return true;
+  if (!bal?.frozenUntil) {
+    frozenCache.set(cacheKey, { until: null, at: nowTs });
+    return false;
+  }
+  if (bal.frozenUntil && bal.frozenUntil > new Date()) {
+    frozenCache.set(cacheKey, { until: bal.frozenUntil, at: nowTs });
+    return true;
+  }
   // expired: clear
   await prisma.pointsBalance.update({
     where: { globalConfigId_guildId_userId: { globalConfigId, guildId, userId } },
     data: { frozenUntil: null },
   }).catch(() => {});
+  frozenCache.set(cacheKey, { until: null, at: nowTs });
   return false;
 }
 
@@ -430,23 +447,33 @@ async function confirmPendingInvites({ prisma, cfg, client }) {
   if (!isInvitesEnabled(cfg)) return;
   const tempoServerHours = cfg.tempoServerHours || 24;
   const cutoff = new Date(Date.now() - tempoServerHours * MINUTE_MS * 60);
-  const pendings = await prisma.pointsInviteLedger.findMany({ where: { status: 'PENDING', invitedAt: { lte: cutoff }, globalConfigId: cfg.globalConfigId || cfg.id } });
-  for (const entry of pendings) {
-    // Anti-farm: se já tem confirmedAt (algum fluxo anterior), não pagar de novo
-    if (entry.confirmedAt) {
-      await prisma.pointsInviteLedger.update({ where: { id: entry.id }, data: { status: 'CONFIRMED' } });
-      continue;
+  const batchSize = 200;
+  let lastId = 0;
+  while (true) {
+    const pendings = await prisma.pointsInviteLedger.findMany({
+      where: { status: 'PENDING', invitedAt: { lte: cutoff }, globalConfigId: cfg.globalConfigId || cfg.id, id: { gt: lastId } },
+      orderBy: { id: 'asc' },
+      take: batchSize,
+    });
+    if (!pendings.length) break;
+    for (const entry of pendings) {
+      lastId = entry.id;
+      // Anti-farm: se já tem confirmedAt (algum fluxo anterior), não pagar de novo
+      if (entry.confirmedAt) {
+        await prisma.pointsInviteLedger.update({ where: { id: entry.id }, data: { status: 'CONFIRMED' } });
+        continue;
+      }
+      const guild = client?.guilds?.cache?.get(entry.guildId);
+      if (!guild) continue;
+      const member = await guild.members.fetch(entry.inviteeId).catch(() => null);
+      if (!member) {
+        await prisma.pointsInviteLedger.update({ where: { id: entry.id }, data: { status: 'REVOKED', revokedAt: new Date(), revokedReason: 'SAIU_ANTES_CONFIRMACAO' } });
+        continue;
+      }
+      const amount = toBigInt(cfg.pontosConvites || 0n);
+      await recordTransaction(prisma, cfg, { guildId: entry.guildId, userId: entry.inviterId, amount, type: 'INVITE', source: 'SYSTEM', reason: 'Convite válido' });
+      await prisma.pointsInviteLedger.update({ where: { id: entry.id }, data: { status: 'CONFIRMED', confirmedAt: new Date(), pointsAwarded: amount } });
     }
-    const guild = client?.guilds?.cache?.get(entry.guildId);
-    if (!guild) continue;
-    const member = await guild.members.fetch(entry.inviteeId).catch(() => null);
-    if (!member) {
-      await prisma.pointsInviteLedger.update({ where: { id: entry.id }, data: { status: 'REVOKED', revokedAt: new Date(), revokedReason: 'SAIU_ANTES_CONFIRMACAO' } });
-      continue;
-    }
-    const amount = toBigInt(cfg.pontosConvites || 0n);
-  await recordTransaction(prisma, cfg, { guildId: entry.guildId, userId: entry.inviterId, amount, type: 'INVITE', source: 'SYSTEM', reason: 'Convite válido' });
-    await prisma.pointsInviteLedger.update({ where: { id: entry.id }, data: { status: 'CONFIRMED', confirmedAt: new Date(), pointsAwarded: amount } });
   }
 }
 

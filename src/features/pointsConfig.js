@@ -108,8 +108,11 @@ async function handleInteraction(interaction, ctx) {
   if (interaction.isChannelSelectMenu() && interaction.customId === 'menu:points:channels:set') {
     return saveChannels(interaction, ctx);
   }
-  if (interaction.isChannelSelectMenu() && interaction.customId === 'menu:points:logs:set') {
-    return saveLogs(interaction, ctx);
+  if (interaction.isChannelSelectMenu() && interaction.customId === 'menu:points:logs:admin:set') {
+    return saveLogChannel(interaction, ctx, 'admin');
+  }
+  if (interaction.isChannelSelectMenu() && interaction.customId === 'menu:points:logs:user:set') {
+    return saveLogChannel(interaction, ctx, 'user');
   }
   if (interaction.isRoleSelectMenu()) {
     if (interaction.customId === 'menu:points:roles:set') return saveRoles(interaction, ctx, 'participant');
@@ -356,24 +359,48 @@ function buildBackRow() {
 
 async function promptLogs(interaction, ctx) {
   await interaction.deferUpdate().catch(() => {});
-  const select = new ChannelSelectMenuBuilder()
-    .setCustomId('menu:points:logs:set')
-    .setPlaceholder('Selecione canais de log (2 canais)')
+  const prisma = ctx.getPrisma();
+  const cfg = await pointsService.getPointsConfig(prisma);
+
+  const adminSelect = new ChannelSelectMenuBuilder()
+    .setCustomId('menu:points:logs:admin:set')
+    .setPlaceholder('Canal de log ADMIN')
     .setMinValues(0)
-    .setMaxValues(2)
-    .addChannelTypes(ChannelType.GuildText);
-  await interaction.editReply({ components: [new ActionRowBuilder().addComponents(select), buildBackRow()] }).catch(() => {});
+    .setMaxValues(1)
+    .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement);
+  if (cfg?.logsAdminChannelId) {
+    adminSelect.setDefaultChannels(cfg.logsAdminChannelId);
+  }
+
+  const userSelect = new ChannelSelectMenuBuilder()
+    .setCustomId('menu:points:logs:user:set')
+    .setPlaceholder('Canal de log USUÁRIOS')
+    .setMinValues(0)
+    .setMaxValues(1)
+    .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement);
+  if (cfg?.logsUsuariosChannelId) {
+    userSelect.setDefaultChannels(cfg.logsUsuariosChannelId);
+  }
+
+  await interaction
+    .editReply({
+      components: [
+        new ActionRowBuilder().addComponents(adminSelect),
+        new ActionRowBuilder().addComponents(userSelect),
+        buildBackRow(),
+      ],
+    })
+    .catch(() => {});
   return true;
 }
 
-async function saveLogs(interaction, ctx) {
+async function saveLogChannel(interaction, ctx, kind) {
   await interaction.deferUpdate().catch(() => {});
   const prisma = ctx.getPrisma();
   const cfg = await pointsService.getPointsConfig(prisma);
-  const channelIds = interaction.values || [];
-  const adminLog = channelIds[0] || null;
-  const userLog = channelIds[1] || null;
-  await prisma.pointsConfig.update({ where: { id: cfg.id }, data: { logsAdminChannelId: adminLog, logsUsuariosChannelId: userLog } });
+  const selected = interaction.values?.[0] || null;
+  const data = kind === 'admin' ? { logsAdminChannelId: selected } : { logsUsuariosChannelId: selected };
+  await prisma.pointsConfig.update({ where: { id: cfg.id }, data });
   invalidateCache();
   const updated = await pointsService.getPointsConfig(prisma);
   await interaction.editReply({ embeds: [buildEmbed(updated)], components: buildHomeComponents() }).catch(() => {});
