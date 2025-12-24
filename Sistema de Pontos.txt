@@ -1,0 +1,94 @@
+MODOS:
+Modo global: Todos participam.
+Modo seletivo: Apenas pessoas com {cargo_participante} irá ser considerados.
+
+ATENÇÃO:
+Bots não participam do sistema de pontos, independentemente do modo ativo.
+
+
+Variaveis:
+{cargo_participante} = Cargo ou lista de cargos que são necessário para poder participar do sistema, caso o Modo seletivo esteja ativado.
+{cargos_ignorados} = Lista de cargos que não participarão do sistema.
+{pessoas_ignoradas} = Lista de ids de usuários que não participarão do sistema.
+{tempo_call} = Quantidade de tempo em minutos para o usuário poder ganhar os {pontos_call} DEFAULT: 5
+{pontos_call} = quantidade de pontos que ganha a cada {tempo_call} tempo.
+{pontos_chat} = Cada mensagem válida → +{pontos_chat} Limitado por cooldown e limite diário (respeitando as regras)
+{canais_chat} = Lista de canais onde o sistema de pontos funcionará. OBS: A pontuação de chat é global por usuário, não por canal.
+Enviar mensagens simultâneas em canais diferentes não gera pontos extras.
+{qtd_caracteres} = Quantidade de caracteres mínimo que deve ter em cada mensagem enviada. DEFAULT = 20
+{cooldown_chat} = cooldown em minutos entre mensagens. DEFAULT: 2
+{tempo_server} = Quantidade em horas que uma conta deve permanecer no servidor para contabilizar o convite. DEFAULT: 24
+{idade_conta} = Idade mínima (em dias) da conta que entrou pelo convite. DEFAULT: 7
+{min_user_call} = Quantidade de usuários que devem estar em call para poder contabilizar os pontos. Se for zero ou 1, significa que não existe quantidade minima. Se for 2 ou mais, o valor será a quantidade mínima. #DEFAULT: 2
+{dias_convite} = Quantidade em dias que um usuário deve permanecer no servidor, caso ele saia, a pessoa que ganhou os pontos de convite deve ter esses mesmos pontos subtraidos.
+_______________________________________________
+Regras de pontos no chat:
+Usuário ganha pontos ao mandar mensagens nos canais {canais_chat}, porém, as mensagens devem passar pelas regras abaixo para serem válidas.
+1. Só nos canais {canais_chat}.
+2. Mensagens devem ter ao menos {qtd_caracteres} caracteres
+3. não podem repetir a anterior.
+4. Cooldown por usuário. O tempo será definido pela variavel {cooldown_chat}
+Resultado: Após passar pelas regras, usuário ganha {pontos_chat}
+_______________________________________________
+Regras de pontos em call:
+Usuário ganha {pontos_call} a cada {tempo_call} que passar em call. Porém, ele deve seguir as regras abaixo.
+Regra: Só contabiliza tempo em call se houver no mínimo {min_user_call} usuários ativos.
+Usuários mutados não recebem pontos.
+_______________________________________________
+Regras convites:
+A pessoa convidada deve ficar ao menos {tempo_server} para contabilizar.
+A pessoa convidada deve ter uma conta com mais de {idade_conta} dias para contabilizar.
+Convites não contam se o usuário sair do servidor antes de {dias_convite} dias após a contabilização. Por tanto, se o usuário sair nesse tempo. Deve ser descontado e registrado em log.
+
+_______________________________________________
+Comandos:
+!pontos e /pontos -> Exibe a quantidade de pontos total.
+/adicionar_pontos -> usuario + pontos
+/remover_pontos -> usuario + pontos
+/resetar_pontos -> pede confirmação com embed.
+/punir -> id/menção, dias, motivo. | Congela o usuário, ele não ganhará mais pontos por x dias. Se dias for = 0. Portanto, punição será permanentemente.
+/rank Exibe o top 10 em mensagem ephemeral.
+
+_______________________________________________
+Logs:
+#Logs administrativos:
+Canal: definido pela variável {canal_logs_admin}
+Devem ser registrados:
+
+1. Adição manual de pontos (/adicionar_pontos)
+2. Remoção manual de pontos (/remover_pontos)
+3. Reset de pontos (/resetar_pontos)
+4. Aplicação de punições (/punir)
+5. Fim de punições automáticas
+6. Desconto de pontos por convite invalidado
+7. Alterações em configurações do sistema de pontos
+8. Ações realizadas pelo sistema que impactem diretamente o saldo de um usuário
+
+Informações mínimas em cada log:
+Usuário afetado (ID e menção)
+Quantidade de pontos adicionados ou removidos
+Motivo da ação
+Origem da ação (Admin / Sistema)
+Data e hora
+Em formato de embed.
+
+
+#Logs de Usuários (Transparência):
+Canal: definido pela variável {canal_logs_usuarios}
+Devem ser registrados:
+1. Ganho de pontos por call. ex: "username Ganhou x pontos por ficar x tempo em call"
+2. Ganho de pontos por chat ex: "username Ganhou x pontos por interagir no chat"
+3. Ganho de pontos por convite válido ex: "username ganhou x pontos por trazer o username2 para o sv"
+4. Perda de pontos automática (ex: convite invalidado) "username perdeu x pontos, pois o username2 saiu do servidor antes de x dias"
+5. Aplicação de punições
+6. Descongelamento de punições
+Em formato de embed.
+
+
+Config:
+A configuração será no /menu.
+Ativar/Desativar sistema.
+Opções adequadas para Configurar todas variaveis citadas aqui.
+Navegação no /menu seguindo lógica de fluxo já existente.
+
+Em /menu deve ter também uma opção para gerar e enviar painel em um canal especificado, esse painel será basicamente um leaderboard com nome e respectivos pontos dos top 20.
