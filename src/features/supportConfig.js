@@ -2,9 +2,13 @@ const { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelSelectMenuBuilder, 
 const { buildSupportConfigEmbed, getSupportPanelPayload } = require('./support');
 const { getGlobalConfig, ensureGlobalConfig } = require('../services/globalConfig');
 
-async function presentMenu(interaction, ctx) {
-  const prisma = ctx.getPrisma();
-  const cfg = await getGlobalConfig(prisma);
+async function ensureDeferred(interaction) {
+  if (!interaction.deferred && !interaction.replied && typeof interaction.deferUpdate === 'function') {
+    await interaction.deferUpdate().catch(() => {});
+  }
+}
+
+async function renderHome(interaction, cfg) {
   const embed = buildSupportConfigEmbed(cfg);
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('menu:back').setLabel('Voltar').setStyle(ButtonStyle.Secondary),
@@ -13,8 +17,15 @@ async function presentMenu(interaction, ctx) {
     new ButtonBuilder().setCustomId('menu:support:log').setLabel('Canal Log Suporte').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('menu:support:panel').setLabel('Enviar/Atualizar').setStyle(ButtonStyle.Success),
   );
-  await interaction.update({ embeds: [embed], components: [row] });
+  await ensureDeferred(interaction);
+  await interaction.editReply({ embeds: [embed], components: [row] }).catch(() => {});
   return true;
+}
+
+async function presentMenu(interaction, ctx) {
+  const prisma = ctx.getPrisma();
+  const cfg = await getGlobalConfig(prisma);
+  return renderHome(interaction, cfg);
 }
 
 async function handleInteraction(interaction, ctx) {
@@ -38,8 +49,11 @@ async function handleInteraction(interaction, ctx) {
 async function handleButtons(interaction, prisma) {
   const customId = interaction.customId;
   const cfg = await getGlobalConfig(prisma);
+  if (customId === 'menu:support:home') {
+    return renderHome(interaction, cfg);
+  }
   if (customId === 'menu:support:channel') {
-    await interaction.deferReply({ ephemeral: true }).catch(() => {});
+    await ensureDeferred(interaction);
     const embed = buildActionEmbed('Canal de Suporte', `Escolha o canal onde o painel ficará disponível.\nAtual: ${cfg?.supportPanelChannelId ? `<#${cfg.supportPanelChannelId}>` : 'não definido'}`);
     const select = new ChannelSelectMenuBuilder()
       .setCustomId('menu:support:channel:set')
@@ -50,11 +64,14 @@ async function handleButtons(interaction, prisma) {
     if (cfg?.supportPanelChannelId && typeof select.setDefaultChannels === 'function') {
       select.setDefaultChannels(cfg.supportPanelChannelId);
     }
-    await interaction.editReply({ embeds: [embed], components: [new ActionRowBuilder().addComponents(select)] }).catch(() => {});
+    await interaction.editReply({ embeds: [embed], components: [
+      new ActionRowBuilder().addComponents(select),
+      new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('menu:support:home').setLabel('Voltar').setStyle(ButtonStyle.Secondary)),
+    ] }).catch(() => {});
     return true;
   }
   if (customId === 'menu:support:roles') {
-    await interaction.deferReply({ ephemeral: true }).catch(() => {});
+    await ensureDeferred(interaction);
     const selectedRoles = cfg?.supportRolesGlobal?.map((r) => `<@&${r.roleId}>`).join(', ') || 'nenhum configurado';
     const embed = buildActionEmbed('Cargos de Suporte', `Selecione quais cargos poderão encerrar atendimentos.\nAtuais: ${selectedRoles}`);
     const select = new RoleSelectMenuBuilder()
@@ -65,11 +82,14 @@ async function handleButtons(interaction, prisma) {
     if (cfg?.supportRolesGlobal?.length && typeof select.setDefaultRoles === 'function') {
       select.setDefaultRoles(...cfg.supportRolesGlobal.map((r) => r.roleId));
     }
-    await interaction.editReply({ embeds: [embed], components: [new ActionRowBuilder().addComponents(select)] }).catch(() => {});
+    await interaction.editReply({ embeds: [embed], components: [
+      new ActionRowBuilder().addComponents(select),
+      new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('menu:support:home').setLabel('Voltar').setStyle(ButtonStyle.Secondary)),
+    ] }).catch(() => {});
     return true;
   }
   if (customId === 'menu:support:log') {
-    await interaction.deferReply({ ephemeral: true }).catch(() => {});
+    await ensureDeferred(interaction);
     const embed = buildActionEmbed('Canal de Log do Suporte', `Selecione o canal onde as transcrições serão enviadas.\nAtual: ${cfg?.supportLogChannelId ? `<#${cfg.supportLogChannelId}>` : 'não definido'}`);
     const select = new ChannelSelectMenuBuilder()
       .setCustomId('menu:support:log:set')
@@ -80,7 +100,10 @@ async function handleButtons(interaction, prisma) {
     if (cfg?.supportLogChannelId && typeof select.setDefaultChannels === 'function') {
       select.setDefaultChannels(cfg.supportLogChannelId);
     }
-    await interaction.editReply({ embeds: [embed], components: [new ActionRowBuilder().addComponents(select)] }).catch(() => {});
+    await interaction.editReply({ embeds: [embed], components: [
+      new ActionRowBuilder().addComponents(select),
+      new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('menu:support:home').setLabel('Voltar').setStyle(ButtonStyle.Secondary)),
+    ] }).catch(() => {});
     return true;
   }
   if (customId === 'menu:support:panel') {
@@ -106,38 +129,38 @@ async function handleSelects(interaction, prisma) {
   const customId = interaction.customId;
   const cfg = await ensureGlobalConfig(prisma);
   if (customId === 'menu:support:channel:set') {
-    await interaction.deferUpdate().catch(() => {});
+    await ensureDeferred(interaction);
     const channelId = interaction.values?.[0];
     if (!channelId) {
       await interaction.followUp({ content: 'Seleção inválida.', ephemeral: true }).catch(() => {});
       return true;
     }
     await prisma.globalConfig.update({ where: { id: cfg.id }, data: { supportPanelChannelId: channelId } });
-    const embed = buildActionEmbed('Canal de suporte atualizado', `Novo canal configurado: <#${channelId}>`);
-    await interaction.editReply({ embeds: [embed], components: [] }).catch(() => {});
+    const updatedCfg = await getGlobalConfig(prisma);
+    await renderHome(interaction, updatedCfg);
     return true;
   }
   if (customId === 'menu:support:log:set') {
-    await interaction.deferUpdate().catch(() => {});
+    await ensureDeferred(interaction);
     const channelId = interaction.values?.[0];
     if (!channelId) {
       await interaction.followUp({ content: 'Seleção inválida.', ephemeral: true }).catch(() => {});
       return true;
     }
     await prisma.globalConfig.update({ where: { id: cfg.id }, data: { supportLogChannelId: channelId } });
-    const embed = buildActionEmbed('Canal de log atualizado', `Logs enviados para: <#${channelId}>`);
-    await interaction.editReply({ embeds: [embed], components: [] }).catch(() => {});
+    const updatedCfg = await getGlobalConfig(prisma);
+    await renderHome(interaction, updatedCfg);
     return true;
   }
   if (customId === 'menu:support:roles:set') {
-    await interaction.deferUpdate().catch(() => {});
+    await ensureDeferred(interaction);
     const roleIds = [...new Set(interaction.values || [])];
     await prisma.supportRoleGlobal.deleteMany({ where: { globalConfigId: cfg.id } });
     if (roleIds.length) {
       await prisma.supportRoleGlobal.createMany({ data: roleIds.map((roleId) => ({ globalConfigId: cfg.id, roleId })) });
     }
-    const embed = buildActionEmbed('Cargos de suporte atualizados', roleIds.length ? roleIds.map((id) => `<@&${id}>`).join(', ') : 'Nenhum cargo configurado');
-    await interaction.editReply({ embeds: [embed], components: [] }).catch(() => {});
+    const updatedCfg = await getGlobalConfig(prisma);
+    await renderHome(interaction, updatedCfg);
     return true;
   }
   return false;

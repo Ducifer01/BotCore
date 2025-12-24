@@ -14,6 +14,19 @@ const SUMMARY_VIEW = 'summary';
 const VOICE_VIEW = 'voice';
 const CHAT_VIEW = 'chat';
 
+async function ensureDeferred(interaction) {
+  if (!interaction.deferred && !interaction.replied) {
+    if (typeof interaction.deferUpdate === 'function') {
+      await interaction.deferUpdate().catch(() => {});
+    }
+  }
+}
+
+async function editPanel(interaction, payload) {
+  await ensureDeferred(interaction);
+  await interaction.editReply(payload).catch(() => {});
+}
+
 async function fetchConfig(prisma) {
   const base = await ensureGlobalConfig(prisma);
   return prisma.globalConfig.findUnique({
@@ -131,7 +144,7 @@ function chatComponents() {
 async function presentMenu(interaction, ctx) {
   const prisma = ctx.getPrisma();
   const cfg = await fetchConfig(prisma);
-  await interaction.update({ embeds: [buildSummaryEmbed(cfg)], components: summaryComponents() });
+  await editPanel(interaction, { embeds: [buildSummaryEmbed(cfg)], components: summaryComponents() });
   return true;
 }
 
@@ -157,8 +170,7 @@ async function handleInteraction(interaction, ctx) {
 }
 
 async function handleButton(interaction, prisma) {
-  // Evitar timeout e manter painel único
-  await interaction.deferUpdate().catch(() => {});
+  await ensureDeferred(interaction);
   const id = interaction.customId;
 
   if (id === 'menu:mute:view:summary') {
@@ -224,8 +236,7 @@ async function handleButton(interaction, prisma) {
 }
 
 async function handleSelect(interaction, prisma) {
-  // Evitar timeout em seletores que fazem I/O
-  await interaction.deferUpdate().catch(() => {});
+  await ensureDeferred(interaction);
   const id = interaction.customId;
   const cfg = await fetchConfig(prisma);
   const value = interaction.values?.[0];
@@ -294,14 +305,14 @@ async function handleSelect(interaction, prisma) {
 async function renderView(interaction, prisma, view) {
   const cfg = await fetchConfig(prisma);
   if (view === VOICE_VIEW) {
-    await safeUpdate(interaction, { embeds: [buildVoiceEmbed(cfg)], components: voiceComponents() });
+    await editPanel(interaction, { embeds: [buildVoiceEmbed(cfg)], components: voiceComponents() });
     return true;
   }
   if (view === CHAT_VIEW) {
-    await safeUpdate(interaction, { embeds: [buildChatEmbed(cfg)], components: chatComponents() });
+    await editPanel(interaction, { embeds: [buildChatEmbed(cfg)], components: chatComponents() });
     return true;
   }
-  await safeUpdate(interaction, { embeds: [buildSummaryEmbed(cfg)], components: summaryComponents() });
+  await editPanel(interaction, { embeds: [buildSummaryEmbed(cfg)], components: summaryComponents() });
   return true;
 }
 
@@ -319,7 +330,7 @@ async function showVoiceRoleSelector(interaction, prisma) {
     .setTitle('Cargo mutado voz')
     .setDescription('Escolha o cargo que será aplicado pelo !mutecall.')
     .setColor(0x5865f2);
-  await interaction.editReply({
+  await editPanel(interaction, {
     embeds: [embed],
     components: [
       new ActionRowBuilder().addComponents(select),
@@ -346,7 +357,7 @@ async function showVoiceUnlockSelector(interaction, prisma) {
     .setTitle('Canal de desbloqueio')
     .setDescription('Quando configurado, usuários mutados manualmente serão soltos ao entrar neste canal.')
     .setColor(0x5865f2);
-  await interaction.editReply({
+  await editPanel(interaction, {
     embeds: [embed],
     components: [
       new ActionRowBuilder().addComponents(select),
@@ -372,7 +383,7 @@ async function showChatRoleSelector(interaction, prisma) {
     .setTitle('Cargo mutado chat')
     .setDescription('Cargo aplicado pelo comando !mute para bloquear envio de mensagens.')
     .setColor(0x57f287);
-  await interaction.editReply({
+  await editPanel(interaction, {
     embeds: [embed],
     components: [
       new ActionRowBuilder().addComponents(select),
@@ -403,7 +414,7 @@ async function showLogSelector(interaction, prisma, view) {
     .setColor(isVoice ? 0x5865f2 : 0x57f287);
   const backId = isVoice ? 'menu:mute:view:voice' : 'menu:mute:view:chat';
   const disableId = isVoice ? 'menu:mute:voice:log:disable' : 'menu:mute:chat:log:disable';
-  await interaction.editReply({
+  await editPanel(interaction, {
     embeds: [embed],
     components: [
       new ActionRowBuilder().addComponents(select),
@@ -436,7 +447,7 @@ async function showPermissionSelector(interaction, prisma, commandType) {
     .setDescription('Escolha quais cargos podem usar este comando. Use "Limpar" para voltar ao padrão (posse/Admin).')
     .addFields({ name: 'Comando', value: describeCommandLabel(commandType) })
     .setColor(resolveViewFromCommand(commandType) === VOICE_VIEW ? 0x5865f2 : 0x57f287);
-  await interaction.editReply({
+  await editPanel(interaction, {
     embeds: [embed],
     components: [
       new ActionRowBuilder().addComponents(select),
@@ -510,7 +521,7 @@ function resolveViewFromCommand(commandType) {
 }
 
 async function invalidSelection(interaction) {
-  await safeReply(interaction, { content: 'Seleção inválida.', ephemeral: true });
+  await editPanel(interaction, { content: 'Seleção inválida.', components: [] }).catch(() => {});
   return true;
 }
 
