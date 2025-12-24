@@ -252,7 +252,7 @@ async function handleChatMessage({ message, prisma, cfg }) {
     if (canGive <= 0n) {
       return false;
     }
-    await recordTransaction(prisma, cfg, { guildId, userId, amount: canGive, type: 'CHAT', source: 'SYSTEM', reason: 'Pontos de chat (limitado)' });
+  await recordTransaction(prisma, cfg, { guildId, userId, amount: canGive, type: 'CHAT', source: 'SYSTEM', reason: 'Pontos de chat (limitado)' });
     await prisma.pointsChatActivity.update({
       where: { id: activity.id },
       data: { lastMessageAt: now, lastMessageHash: contentHash, dailyPoints: limit, dailyDate: today },
@@ -400,7 +400,7 @@ async function confirmPendingInvites({ prisma, cfg, client }) {
       continue;
     }
     const amount = toBigInt(cfg.pontosConvites || 0n);
-    await recordTransaction(prisma, cfg, { guildId: entry.guildId, userId: entry.inviterId, amount, type: 'INVITE', source: 'SYSTEM', reason: 'Convite válido' });
+  await recordTransaction(prisma, cfg, { guildId: entry.guildId, userId: entry.inviterId, amount, type: 'INVITE', source: 'SYSTEM', reason: 'Convite válido' });
     await prisma.pointsInviteLedger.update({ where: { id: entry.id }, data: { status: 'CONFIRMED', confirmedAt: new Date(), pointsAwarded: amount } });
   }
 }

@@ -46,7 +46,7 @@ async function handleMessage(message, ctx) {
     const prisma = ctx.getPrisma();
     const cfg = await loadConfig(prisma);
     if (!isSystemEnabled(cfg)) return false;
-    await handleChatMessage({ message, prisma, cfg });
+  await handleChatMessage({ message, prisma, cfg });
   } catch (err) {
     console.warn('[points] erro handleMessage', err?.message || err);
   }

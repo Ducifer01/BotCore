@@ -73,10 +73,10 @@ async function handleInteraction(interaction, ctx) {
     return toggleMode(interaction, ctx);
   }
   if (interaction.isButton() && interaction.customId === 'menu:points:numbers1') {
-    return showNumbersModal(interaction, 'numbers1');
+    return showNumbersModal(interaction, ctx, 'numbers1');
   }
   if (interaction.isButton() && interaction.customId === 'menu:points:numbers2') {
-    return showNumbersModal(interaction, 'numbers2');
+    return showNumbersModal(interaction, ctx, 'numbers2');
   }
   if (interaction.isButton() && interaction.customId === 'menu:points:channels') {
     return promptChannels(interaction, ctx);
@@ -145,23 +145,85 @@ async function toggleMode(interaction, ctx) {
   return true;
 }
 
-async function showNumbersModal(interaction, which) {
+async function showNumbersModal(interaction, ctx, which) {
+  const prisma = ctx.getPrisma();
+  const cfg = await pointsService.getPointsConfig(prisma);
   const modal = new ModalBuilder().setTitle(which === 'numbers1' ? 'Pontos / Cooldown' : 'Call / Convites').setCustomId(`menu:points:${which}:modal`);
   if (which === 'numbers1') {
     modal.addComponents(
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('pontos_chat').setLabel('pontos_chat').setStyle(TextInputStyle.Short).setRequired(true)),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('pontos_call').setLabel('pontos_call').setStyle(TextInputStyle.Short).setRequired(true)),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('pontos_convites').setLabel('pontos_convites').setStyle(TextInputStyle.Short).setRequired(true)),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('cooldown_chat').setLabel('cooldown_chat (min)').setStyle(TextInputStyle.Short).setRequired(true)),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('limit_diario').setLabel('limite diário (0 = off)').setStyle(TextInputStyle.Short).setRequired(true)),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('pontos_chat')
+          .setLabel('pontos chat')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setValue(String(cfg?.pontosChat ?? 0))),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('pontos_call')
+          .setLabel('pontos call')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setValue(String(cfg?.pontosCall ?? 0))),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('pontos_convites')
+          .setLabel('pontos convites')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setValue(String(cfg?.pontosConvites ?? 0))),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('cooldown_chat')
+          .setLabel('cooldown_chat (min)')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setValue(String(cfg?.cooldownChatMinutes ?? 0))),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('limit_diario')
+          .setLabel('limite diário (0 = off)')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setValue(String(cfg?.limitDailyChat ?? 0))),
     );
   } else {
     modal.addComponents(
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('tempo_call').setLabel('tempo_call (min)').setStyle(TextInputStyle.Short).setRequired(true)),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('min_user_call').setLabel('min_user_call').setStyle(TextInputStyle.Short).setRequired(true)),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('qtd_caracteres').setLabel('qtd_caracteres').setStyle(TextInputStyle.Short).setRequired(true)),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('dias_convite').setLabel('dias_convite').setStyle(TextInputStyle.Short).setRequired(true)),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('tempo_server').setLabel('tempo_server (h)').setStyle(TextInputStyle.Short).setRequired(true)),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('tempo_call')
+          .setLabel('tempo_call (min)')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setValue(String(cfg?.tempoCallMinutes ?? 0))),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('min_user_call')
+          .setLabel('min_user_call')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setValue(String(cfg?.minUserCall ?? 0))),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('qtd_caracteres')
+          .setLabel('qtd_caracteres')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setValue(String(cfg?.qtdCaracteresMin ?? 0))),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('dias_convite')
+          .setLabel('dias_convite')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setValue(String(cfg?.diasConvite ?? 0))),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('tempo_server')
+          .setLabel('tempo_server (h)')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setValue(String(cfg?.tempoServerHours ?? 0))),
     );
   }
   await interaction.showModal(modal).catch(() => {});
