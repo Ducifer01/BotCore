@@ -1,6 +1,7 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
-const awaitingRoleEdit = new Map(); // Map<userId, { roleId, type, channelId }>
+const ROLE_EDIT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutos
+const awaitingRoleEdit = new Map(); // Map<userId, { roleId, type, channelId, expiresAt }>
 
 async function handleInteraction(interaction) {
   const customId = interaction.customId;
@@ -31,40 +32,42 @@ async function handleInteraction(interaction) {
   // Botões
   if (!interaction.isButton()) return false;
   const [, action, roleId] = customId.split(':');
+  await interaction.deferUpdate().catch(() => {});
   if (!roleId) {
-    await interaction.reply({ content: 'Requisição inválida.', ephemeral: true });
+    await interaction.followUp({ content: 'Requisição inválida.', ephemeral: true }).catch(() => {});
     return true;
   }
   const role = interaction.guild.roles.cache.get(roleId) || await interaction.guild.roles.fetch(roleId).catch(() => null);
   if (!role) {
-    await interaction.reply({ content: 'Cargo não encontrado.', ephemeral: true });
+    await interaction.followUp({ content: 'Cargo não encontrado.', ephemeral: true }).catch(() => {});
     return true;
   }
   if (action === 'back') {
+    awaitingRoleEdit.delete(interaction.user.id);
     const embed = new EmbedBuilder().setTitle(`Editar cargo: ${role.name}`).setDescription('Escolha o que deseja editar.');
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`role-edit:name:${role.id}`).setLabel('Editar nome').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(`role-edit:emoji:${role.id}`).setLabel('Editar emoji').setStyle(ButtonStyle.Secondary),
     );
-    await interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
+    await interaction.editReply({ embeds: [embed], components: [row] }).catch(() => {});
     return true;
   }
   if (action === 'name') {
-    awaitingRoleEdit.set(interaction.user.id, { roleId, type: 'name', channelId: interaction.channelId });
+    awaitingRoleEdit.set(interaction.user.id, { roleId, type: 'name', channelId: interaction.channelId, expiresAt: Date.now() + ROLE_EDIT_TIMEOUT_MS });
     const embed = new EmbedBuilder().setTitle('Editar nome do cargo').setDescription('Digite o novo nome neste canal.');
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`role-edit:back:${role.id}`).setLabel('Voltar').setStyle(ButtonStyle.Danger),
     );
-    await interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
+    await interaction.editReply({ embeds: [embed], components: [row] }).catch(() => {});
     return true;
   }
   if (action === 'emoji') {
-    awaitingRoleEdit.set(interaction.user.id, { roleId, type: 'emoji', channelId: interaction.channelId });
+    awaitingRoleEdit.set(interaction.user.id, { roleId, type: 'emoji', channelId: interaction.channelId, expiresAt: Date.now() + ROLE_EDIT_TIMEOUT_MS });
     const embed = new EmbedBuilder().setTitle('Editar emoji do cargo').setDescription('Envie um emoji de servidor (custom) neste canal.');
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`role-edit:back:${role.id}`).setLabel('Voltar').setStyle(ButtonStyle.Danger),
     );
-    await interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
+    await interaction.editReply({ embeds: [embed], components: [row] }).catch(() => {});
     return true;
   }
   return false;
@@ -74,6 +77,10 @@ async function handleMessage(message, ctx) {
   if (message.author.bot || !message.guild) return false;
   if (!ctx.isGuildAllowed(message.guildId)) return false;
   const pending = awaitingRoleEdit.get(message.author.id);
+  if (pending?.expiresAt && pending.expiresAt < Date.now()) {
+    awaitingRoleEdit.delete(message.author.id);
+    return false;
+  }
   if (!pending) return false;
   if (pending.channelId !== message.channel.id) return false;
   const role = message.guild.roles.cache.get(pending.roleId) || await message.guild.roles.fetch(pending.roleId).catch(() => null);
