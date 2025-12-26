@@ -14,7 +14,7 @@ module.exports = {
     ),
   async execute(interaction) {
     if (!(await checkAccess(interaction, 'conectar'))) {
-      return interaction.reply({ content: 'Você não tem permissão para este comando.', ephemeral: true });
+      return interaction.reply({ content: 'Você não tem permissão para usar este comando.', ephemeral: true });
     }
 
     const me = interaction.guild.members.me;

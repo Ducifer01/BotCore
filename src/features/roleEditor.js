@@ -20,7 +20,7 @@ async function handleInteraction(interaction) {
       await interaction.followUp({ content: 'Cargo não encontrado.', ephemeral: true }).catch(() => {});
       return true;
     }
-    const embed = new EmbedBuilder().setTitle(`Editar cargo: ${role.name}`).setDescription('Escolha o que deseja editar. Obs: Apenas ações de quem iniciou serão aceitas.');
+    const embed = new EmbedBuilder().setTitle(`Editar cargo: ${role.name}`).setDescription('Escolha o que deseja editar.');
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`role-edit:name:${role.id}`).setLabel('Editar nome').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(`role-edit:emoji:${role.id}`).setLabel('Editar emoji').setStyle(ButtonStyle.Secondary),

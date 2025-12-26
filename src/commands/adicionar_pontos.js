@@ -12,7 +12,7 @@ module.exports = {
     const prisma = getPrisma();
     const POSSE_USER_ID = String(process.env.POSSE_USER_ID || '').trim();
     if (!POSSE_USER_ID || POSSE_USER_ID !== interaction.user.id) {
-      return interaction.reply({ content: 'Apenas o usuário posse pode usar este comando.', ephemeral: true });
+      return interaction.reply({ content: 'Você não tem permissão para usar esse comando. Ele está aqui para corrigir possíveis bugs ou erros na pontuação.', ephemeral: true });
     }
     await ensurePointsConfig(prisma);
     const cfg = await getPointsConfig(prisma);
@@ -33,7 +33,7 @@ module.exports = {
     await sendLog(interaction.client, cfg.logsAdminChannelId, {
       embeds: [
         {
-          title: 'Pontos adicionados (manual)',
+          title: 'Pontos adicionados manualmente',
           description: `${interaction.user} adicionou **${amount}** pontos para ${targetUser} (total: **${toBigInt(balance.points)}**).`,
           timestamp: new Date().toISOString(),
           color: 0x2ecc71,

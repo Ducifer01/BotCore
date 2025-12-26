@@ -11,7 +11,7 @@ module.exports = {
     const prisma = getPrisma();
     const POSSE_USER_ID = String(process.env.POSSE_USER_ID || '').trim();
     if (!POSSE_USER_ID || POSSE_USER_ID !== interaction.user.id) {
-      return interaction.reply({ content: 'Apenas o usuário posse pode usar este comando.', ephemeral: true });
+      return interaction.reply({ content: 'Você não tem permissão para usar esse comando.', ephemeral: true });
     }
     await ensurePointsConfig(prisma);
     const cfg = await getPointsConfig(prisma);

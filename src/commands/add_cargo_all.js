@@ -42,7 +42,7 @@ module.exports = {
         `Cargo alvo: <@&${role.id}>`,
         `Ignorar (não receberão): ${exclusionInfo}`,
         '',
-        '⚠️ **Atenção:** os membros que possuírem qualquer cargo listado em "Ignorar" serão pulados e não receberão o cargo selecionado.',
+        '**Atenção:** os membros que possuírem qualquer cargo listado em "Ignorar" serão pulados e não receberão o cargo selecionado.',
         'Tem certeza que deseja adicionar este cargo a todos os demais membros?',
       ].join('\n'))
       .setColor(0x2ecc71);
