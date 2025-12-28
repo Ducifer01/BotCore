@@ -70,12 +70,12 @@ module.exports = {
       fetchReply: true,
     });
 
-    const collector = msg.createMessageComponentCollector({
+    const collector = interaction.channel?.createMessageComponentCollector({
       time: 2 * 60_000,
-      filter: (i) => i.user.id === interaction.user.id,
+      filter: (i) => i.user.id === interaction.user.id && i.message?.id === msg.id,
     });
 
-    collector.on('collect', async (i) => {
+    collector?.on('collect', async (i) => {
       await i.deferUpdate().catch(() => {});
       if (i.customId === 'hist:prev' && page > 1) {
         page -= 1;
@@ -83,11 +83,14 @@ module.exports = {
       if (i.customId === 'hist:next' && page < totalPages) {
         page += 1;
       }
-      await msg.edit({ embeds: [buildPageEmbed(txs.slice((page - 1) * PAGE_SIZE, (page - 1) * PAGE_SIZE + PAGE_SIZE), page)], components: buildButtons(page, totalPages) }).catch(() => {});
+      await interaction.editReply({
+        embeds: [buildPageEmbed(txs.slice((page - 1) * PAGE_SIZE, (page - 1) * PAGE_SIZE + PAGE_SIZE), page)],
+        components: buildButtons(page, totalPages),
+      }).catch(() => {});
     });
 
-    collector.on('end', async () => {
-      await msg.edit({ components: [] }).catch(() => {});
+    collector?.on('end', async () => {
+      await interaction.editReply({ components: [] }).catch(() => {});
     });
   },
 };
