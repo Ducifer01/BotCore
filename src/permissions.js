@@ -38,4 +38,16 @@ async function checkAccess(interaction, commandName) {
   return memberRoles.some((role) => allowedRoles.includes(role.id));
 }
 
-module.exports = { ensureGuild, checkAccess };
+async function checkAccessForMember(member, commandName, prisma) {
+  const POSSE_USER_ID = String(process.env.POSSE_USER_ID || '').trim();
+  if (POSSE_USER_ID && member?.id === POSSE_USER_ID) return true;
+  const normalized = normalizeCommandName(commandName);
+  if (!normalized || !isCommandManaged(normalized)) return true;
+  const allowedRoles = await getAllowedRolesForCommand(normalized, prisma);
+  if (!allowedRoles.length) return false;
+  const roles = member?.roles?.cache;
+  if (!roles?.size) return false;
+  return roles.some((role) => allowedRoles.includes(role.id));
+}
+
+module.exports = { ensureGuild, checkAccess, checkAccessForMember };

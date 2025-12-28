@@ -5,6 +5,7 @@ const { getGlobalConfig } = require('../services/globalConfig');
 const { getUserStats } = require('../services/userStats');
 const { getAllowedRolesForCommand } = require('../services/commandPermissions');
 const { addToBlacklist, removeFromBlacklist, isBlacklisted, getBlacklistEntry, listBlacklist } = require('../services/blacklist');
+const { checkAccessForMember } = require('../permissions');
 
 const PREFIX = '!';
 const TEMP_MESSAGE_TTL = 15000;
@@ -177,6 +178,16 @@ async function handleMessage(message, ctx) {
   const handler = COMMAND_HANDLERS[commandName];
   if (!handler) {
     return false;
+  }
+
+  // Guardar permissões via /menu para comandos de blacklist prefixados
+  if (['addblacklist', 'removeblacklist', 'verblacklist'].includes(commandName)) {
+    const hasAccess = await checkAccessForMember(message.member, commandName, prisma);
+    if (!hasAccess) {
+      await sendTemporaryMessage(message.channel, 'Você não tem permissão para este comando.', TEMP_MESSAGE_TTL);
+      await deleteCommandMessage(message);
+      return true;
+    }
   }
 
   if (commandName === 'ping') {

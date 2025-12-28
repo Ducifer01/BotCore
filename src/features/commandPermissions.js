@@ -27,6 +27,9 @@ const STATIC_MANAGED_COMMANDS = [
     label: '!remover_verificado',
     description: 'Inicia o fluxo para remover a verificação de alguém.',
   },
+  { key: 'addblacklist', label: '!addblacklist', description: 'Adiciona usuário à blacklist (prefixado).' },
+  { key: 'removeblacklist', label: '!removeblacklist', description: 'Remove usuário da blacklist (prefixado).' },
+  { key: 'verblacklist', label: '!verblacklist', description: 'Lista usuários da blacklist (prefixado).' },
 ];
 
 function getManagedCommands(ctx) {
