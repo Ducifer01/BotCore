@@ -28,6 +28,7 @@ const userStatsFeature = require('./features/userStats');
 const pointsSystem = require('./features/pointsSystem');
 const pointsInteractions = require('./features/pointsInteractions');
 const pointsConfigFeature = require('./features/pointsConfig');
+const blacklistFeature = require('./features/blacklist');
 const { ALLOWED_GUILD_IDS, isGuildAllowed } = require('./config');
 
 const client = new Client({ intents: [
@@ -114,6 +115,7 @@ const interactionFeatures = [
 
 const messageFeatures = [pointsSystem, userStatsFeature, autoModFeature, roleEditorFeature, instaFeature, moderationCommands, muteCommands];
 const guildUpdateFeatures = [instaFeature];
+const guildMemberAddFeatures = [blacklistFeature];
 
 function buildHandlerContext() {
   return {
@@ -265,6 +267,19 @@ client.on('guildMemberRemove', async (member) => {
     if (!isGuildAllowed(member.guild.id)) return;
     if (typeof pointsSystem.handleGuildMemberRemove === 'function') {
       await pointsSystem.handleGuildMemberRemove(member);
+    }
+  } catch (err) {
+    console.error(err);
+  }
+});
+
+client.on('guildMemberAdd', async (member) => {
+  try {
+    if (!isGuildAllowed(member.guild.id)) return;
+    const ctx = buildHandlerContext();
+    for (const feature of guildMemberAddFeatures) {
+      if (typeof feature.handleGuildMemberAdd !== 'function') continue;
+      await feature.handleGuildMemberAdd(member, ctx);
     }
   } catch (err) {
     console.error(err);

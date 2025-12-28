@@ -4,10 +4,12 @@ const { COMMAND_TYPES, ensureModerationConfig, memberHasPermission } = require('
 const { getGlobalConfig } = require('../services/globalConfig');
 const { getUserStats } = require('../services/userStats');
 const { getAllowedRolesForCommand } = require('../services/commandPermissions');
+const { addToBlacklist, removeFromBlacklist, isBlacklisted, getBlacklistEntry, listBlacklist } = require('../services/blacklist');
 
 const PREFIX = '!';
 const TEMP_MESSAGE_TTL = 15000;
 const LOG_PREVIEW_TTL = 20000;
+const BLACKLIST_MESSAGE_TTL = 10000;
 
 class CommandUsageError extends Error {
   constructor(message, usageKey) {
@@ -153,6 +155,9 @@ const COMMAND_HANDLERS = {
   ping: handlePingCommand,
   info: handleInfoCommand,
   remover_verificado: handleRemoveVerifiedCommand,
+  addblacklist: handlePrefixAddBlacklist,
+  removeblacklist: handlePrefixRemoveBlacklist,
+  verblacklist: handlePrefixVerBlacklist,
 };
 
 const pingCooldowns = new Map();
@@ -230,6 +235,11 @@ async function handlePrefixUnban(message, args, prisma, posseId) {
     throw new CommandUsageError('informe o id do usuario e o motivo. ex: !unban 123456789 Resolvido.', 'unban');
   }
   const reason = args.join(' ');
+  const blacklisted = await isBlacklisted({ prisma, guildId: message.guildId, userId: targetId });
+  if (blacklisted) {
+    await sendTemporaryMessage(message.channel, 'Você não pode desbanir um usuário que está na blacklist', BLACKLIST_MESSAGE_TTL);
+    return;
+  }
   const result = await runUnban({
     guild: message.guild,
     moderatorMember: message.member,
@@ -294,6 +304,76 @@ async function handlePrefixRemoveCastigo(message, args, prisma, posseId) {
     posseId,
   });
   await sendSuccessFeedback(message.channel, result.message, result.logEmbed);
+}
+
+async function handlePrefixAddBlacklist(message, args, prisma, posseId) {
+  await assertCommandPermission(COMMAND_TYPES.BAN, message, prisma, posseId);
+  if (args.length < 2) {
+    throw new CommandUsageError('Use: !addblacklist @usuario/id motivo', 'addblacklist');
+  }
+  const targetId = extractId(args.shift());
+  if (!targetId) {
+    throw new CommandUsageError('Use: !addblacklist @usuario/id motivo', 'addblacklist');
+  }
+  const reason = args.join(' ').trim();
+  if (!reason) {
+    throw new CommandUsageError('Informe um motivo para adicionar na blacklist. ex: !addblacklist @usuario Não é bem-vindo', 'addblacklist');
+  }
+  const existing = await getBlacklistEntry({ prisma, guildId: message.guildId, userId: targetId });
+  if (existing) {
+    await sendTemporaryMessage(message.channel, 'Esse usuário já está na blacklist', BLACKLIST_MESSAGE_TTL);
+    return;
+  }
+  await addToBlacklist({ prisma, guildId: message.guildId, userId: targetId, reason, createdBy: message.author.id });
+  const member = await message.guild.members.fetch(targetId).catch(() => null);
+  if (member) {
+    await sendTemporaryMessage(message.channel, 'Usuário adicionado à blacklist, porém esse usuário ainda se encontra no servidor. Use !ban', BLACKLIST_MESSAGE_TTL);
+  } else {
+    await sendTemporaryMessage(message.channel, 'Usuário adicionado à blacklist e será banido automaticamente ao entrar.', BLACKLIST_MESSAGE_TTL);
+  }
+}
+
+async function handlePrefixRemoveBlacklist(message, args, prisma, posseId) {
+  await assertCommandPermission(COMMAND_TYPES.BAN, message, prisma, posseId);
+  if (args.length < 1) {
+    throw new CommandUsageError('Use: !removeblacklist @usuario/id', 'removeblacklist');
+  }
+  const targetId = extractId(args.shift());
+  if (!targetId) {
+    throw new CommandUsageError('Use: !removeblacklist @usuario/id', 'removeblacklist');
+  }
+  const existing = await getBlacklistEntry({ prisma, guildId: message.guildId, userId: targetId });
+  if (!existing) {
+    await sendTemporaryMessage(message.channel, 'Esse usuário não está na blacklist', BLACKLIST_MESSAGE_TTL);
+    return;
+  }
+  await removeFromBlacklist({ prisma, guildId: message.guildId, userId: targetId });
+  const ban = await message.guild.bans.fetch(targetId).catch(() => null);
+  if (ban) {
+    await sendTemporaryMessage(message.channel, 'Usuário removido da blacklist, porém esse usuário está banido. Use !unban', BLACKLIST_MESSAGE_TTL);
+  } else {
+    await sendTemporaryMessage(message.channel, 'Usuário removido da blacklist', BLACKLIST_MESSAGE_TTL);
+  }
+}
+
+async function handlePrefixVerBlacklist(message, _args, prisma, posseId) {
+  await assertCommandPermission(COMMAND_TYPES.BAN, message, prisma, posseId);
+  const entries = await listBlacklist({ prisma, guildId: message.guildId, take: 50 });
+  if (!entries.length) {
+    await sendTemporaryMessage(message.channel, 'Nenhum usuário na blacklist', BLACKLIST_MESSAGE_TTL);
+    return;
+  }
+  const description = entries
+    .map((entry) => {
+      const reasonText = entry.reason ? `\nMotivo: ${entry.reason}` : '';
+      return `<@${entry.userId}> \`${entry.userId}\`${reasonText}`;
+    })
+    .join('\n\n');
+  const embed = new EmbedBuilder()
+    .setTitle('Blacklist')
+    .setDescription(description)
+    .setColor(0x5865F2);
+  await message.channel.send({ embeds: [embed] });
 }
 
 async function handlePingCommand(message) {

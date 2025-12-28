@@ -1,6 +1,7 @@
 const { SlashCommandBuilder } = require('discord.js');
 const { getPrisma } = require('../db');
 const { runUnban } = require('../actions/moderationActions');
+const { isBlacklisted } = require('../services/blacklist');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -19,6 +20,11 @@ module.exports = {
     const targetId = extractId(rawTarget);
     if (!targetId) {
       await interaction.reply({ content: 'Forneça um ID ou menção válido.', ephemeral: true });
+      return;
+    }
+    const blacklisted = await isBlacklisted({ prisma, guildId: interaction.guildId, userId: targetId });
+    if (blacklisted) {
+      await interaction.reply({ content: 'Você não pode desbanir um usuário que está na blacklist', ephemeral: true });
       return;
     }
     try {
