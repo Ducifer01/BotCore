@@ -16,12 +16,12 @@ const SNAPSHOT_ALERT_COLOR = 0xe74c3c;
 
 const runtime = {
   configs: new Map(), // guildId -> config
-  pendingRestore: new Map(), // channelId -> timeout
+  pendingRestore: new Map(), // channelId -> snapshot
   restoring: new Set(),
-  warnCooldowns: new Map(), // channelId -> timestamp
+  messageCooldowns: new Map(), // channelId -> timestamp
 };
 
-const SNAPSHOT_WARN_COOLDOWN_MS = 60_000;
+const SNAPSHOT_MESSAGE_COOLDOWN_MS = 60_000;
 
 function parseSnapshot(snapshot) {
   if (!snapshot) return null;
@@ -53,7 +53,7 @@ function snapshotChannel(channel) {
   if (channel.type === ChannelType.GuildVoice || channel.type === ChannelType.GuildStageVoice) {
     base.bitrate = channel.bitrate;
     base.userLimit = channel.userLimit;
-    base.rtcRegion = channel.rtcRegion;
+    base.rtcRegion = channel.rtcRegion; // This line is unchanged but kept for context
   }
   return base;
 }
@@ -146,6 +146,7 @@ function buildSnapshotsComponents(config) {
       .setCustomId(CUSTOM_IDS.SNAPSHOTS_CHANNELS)
       .setPlaceholder('Selecione canais/categorias protegidos')
       .addChannelTypes(ChannelType.GuildVoice, ChannelType.GuildStageVoice, ChannelType.GuildCategory)
+      .setDefaultChannels(...(config.targets?.map((t) => t.channelId) || []))
       .setMinValues(1)
       .setMaxValues(25)
   ));
@@ -215,7 +216,9 @@ async function handleChannelsSelect(interaction) {
   }
   const updated = await setTargets(interaction.guildId, snapshots, interaction.client.prisma);
   runtime.configs.set(interaction.guildId, updated);
-  await interaction.update({ embeds: [buildSnapshotsEmbed(updated)], components: buildSnapshotsComponents(updated) }).catch(() => {});
+  await interaction.update({ embeds: [buildSnapshotsEmbed(updated)], components: buildSnapshotsComponents(updated) }).catch((err) => {
+    console.warn('[snapshot] Falha ao atualizar painel após salvar alvos:', err?.message || err);
+  });
   return true;
 }
 
@@ -223,8 +226,17 @@ function buildInfoEmbed(description, color = SNAPSHOT_COLOR) {
   return new EmbedBuilder().setTitle('Sistema de Snapshot').setDescription(description).setColor(color);
 }
 
+function shouldSendMessage(channelId) {
+  const last = runtime.messageCooldowns.get(channelId) || 0;
+  const now = Date.now();
+  if (now - last < SNAPSHOT_MESSAGE_COOLDOWN_MS) return false;
+  runtime.messageCooldowns.set(channelId, now);
+  return true;
+}
+
 async function notifyChannel(channel, description, color) {
   if (!channel || !channel.send) return;
+  if (!shouldSendMessage(channel.id)) return;
   await channel.send({ embeds: [buildInfoEmbed(description, color)] }).catch(() => {});
 }
 
@@ -238,13 +250,9 @@ async function handleChannelUpdate(oldChannel, newChannel) {
   const isVoice = newChannel.type === ChannelType.GuildVoice || newChannel.type === ChannelType.GuildStageVoice;
 
   if (cfg.waitForEmpty && isVoice && newChannel.members.size > 0) {
-    const lastWarn = runtime.warnCooldowns.get(newChannel.id) || 0;
-    const now = Date.now();
-    if (now - lastWarn >= SNAPSHOT_WARN_COOLDOWN_MS) {
-      await notifyChannel(newChannel, 'Snapshot ativo: assim que a call esvaziar eu restauro as configurações.', SNAPSHOT_WARN_COLOR);
-      runtime.warnCooldowns.set(newChannel.id, now);
-    }
+    await notifyChannel(newChannel, 'Snapshot ativo: assim que a call esvaziar eu restauro as configurações.', SNAPSHOT_WARN_COLOR);
     runtime.pendingRestore.set(newChannel.id, snapshot);
+    console.debug('[snapshot] pending restore armed', { channelId: newChannel.id, members: newChannel.members.size });
     return;
   }
 
@@ -266,12 +274,15 @@ async function handleVoiceStateUpdate(oldState, newState) {
     runtime.pendingRestore.delete(channel.id);
     return;
   }
-  await notifyChannel(channel, 'Restaurando as configurações deste canal em 5s...', SNAPSHOT_WARN_COLOR);
-  setTimeout(async () => {
+  console.debug('[snapshot] restoring channel', { channelId: channel.id, members: channel.members.size });
+  await notifyChannel(channel, 'Restaurando as configurações deste canal agora.', SNAPSHOT_WARN_COLOR);
+  try {
+    const liveChannel = await channel.fetch().catch(() => channel);
     const fresh = parseSnapshot(runtime.pendingRestore.get(channel.id)) || snapshot;
-    await restoreChannel(channel, fresh);
+    await restoreChannel(liveChannel, fresh);
+  } finally {
     runtime.pendingRestore.delete(channel.id);
-  }, 5000);
+  }
 }
 
 async function preloadConfigs(client) {
