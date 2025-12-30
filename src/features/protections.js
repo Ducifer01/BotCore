@@ -1,5 +1,5 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, ChannelSelectMenuBuilder, ChannelType } = require('discord.js');
-const { loadConfig, setEnabled, setWaitForEmpty, setTargets } = require('../services/snapshots');
+const { loadConfig, setEnabled, setWaitForEmpty, setTargets, normalizeConfig } = require('../services/snapshots');
 const { ensureGuild } = require('../permissions');
 
 const CUSTOM_IDS = {
@@ -241,7 +241,7 @@ async function preloadConfigs(client) {
     const prisma = client.prisma;
     const configs = await prisma.snapshotConfig.findMany({ include: { targets: true } });
     for (const cfg of configs) {
-      runtime.configs.set(cfg.guildId, cfg);
+      runtime.configs.set(cfg.guildId, normalizeConfig(cfg));
     }
   } catch (err) {
     console.warn('[snapshot] Falha ao carregar configs:', err?.message || err);
