@@ -29,6 +29,7 @@ const pointsSystem = require('./features/pointsSystem');
 const pointsInteractions = require('./features/pointsInteractions');
 const pointsConfigFeature = require('./features/pointsConfig');
 const blacklistFeature = require('./features/blacklist');
+const permissionsManager = require('./features/permissionsManager');
 const { ALLOWED_GUILD_IDS, isGuildAllowed } = require('./config');
 
 const client = new Client({ intents: [
@@ -38,11 +39,21 @@ const client = new Client({ intents: [
   GatewayIntentBits.GuildMessages,
   GatewayIntentBits.MessageContent,
 ] });
+client.prisma = getPrisma();
 client.commands = new Collection();
 
 const commandsPath = path.join(__dirname, 'commands');
+const disabledCommands = new Set([
+  'copiar_perm_canal.js',
+  'copiar_perm_categoria.js',
+  'copiar_perm_cargo.js',
+]);
 const commandFiles = fs.readdirSync(commandsPath).filter((file) => file.endsWith('.js'));
 for (const file of commandFiles) {
+  if (disabledCommands.has(file)) {
+    console.log(`[commands] Ignorando legado ${file} (substituído por /permissoes).`);
+    continue;
+  }
   const command = require(path.join(commandsPath, file));
   if (command?.data && command?.execute) {
     client.commands.set(command.data.name, command);
@@ -110,6 +121,7 @@ const interactionFeatures = [
   channelCleanerFeature,
   pointsInteractions,
   pointsConfigFeature,
+  permissionsManager,
   { handleInteraction: handleSupportInteraction },
 ];
 
