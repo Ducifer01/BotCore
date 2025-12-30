@@ -18,7 +18,23 @@ const runtime = {
   configs: new Map(), // guildId -> config
   pendingRestore: new Map(), // channelId -> timeout
   restoring: new Set(),
+  warnCooldowns: new Map(), // channelId -> timestamp
 };
+
+const SNAPSHOT_WARN_COOLDOWN_MS = 60_000;
+
+function parseSnapshot(snapshot) {
+  if (!snapshot) return null;
+  if (typeof snapshot === 'string') {
+    try {
+      return JSON.parse(snapshot);
+    } catch (err) {
+      console.warn('[snapshot] Falha ao parsear snapshot salvo:', err?.message || err);
+      return null;
+    }
+  }
+  return snapshot;
+}
 
 function snapshotChannel(channel) {
   if (!channel) return null;
@@ -46,15 +62,24 @@ async function restoreChannel(channel, snapshot) {
   if (!channel || !snapshot) return;
   runtime.restoring.add(channel.id);
   try {
-    if (snapshot.name && channel.editable) {
-      await channel.edit({
-        name: snapshot.name,
-        parent: snapshot.parentId || null,
-        bitrate: snapshot.bitrate,
-        userLimit: snapshot.userLimit,
-        rtcRegion: snapshot.rtcRegion,
-      }).catch(() => {});
+    const isVoice = channel.type === ChannelType.GuildVoice || channel.type === ChannelType.GuildStageVoice;
+    const isCategory = channel.type === ChannelType.GuildCategory;
+
+    if (snapshot.name) {
+      const payload = { name: snapshot.name };
+      if (isVoice) {
+        payload.parent = snapshot.parentId || null;
+        payload.bitrate = snapshot.bitrate;
+        payload.userLimit = snapshot.userLimit;
+        payload.rtcRegion = snapshot.rtcRegion || null;
+      } else if (!isCategory) {
+        payload.parent = snapshot.parentId || null;
+      }
+      await channel.edit(payload, 'Snapshot restore').catch((err) => {
+        console.warn('[snapshot] Falha ao restaurar canal (edit):', err?.message || err);
+      });
     }
+
     if (snapshot.permissionOverwrites) {
       const data = snapshot.permissionOverwrites.map((ow) => ({
         id: ow.id,
@@ -62,7 +87,9 @@ async function restoreChannel(channel, snapshot) {
         allow: BigInt(ow.allow || '0'),
         deny: BigInt(ow.deny || '0'),
       }));
-      await channel.permissionOverwrites.set(data).catch(() => {});
+      await channel.permissionOverwrites.set(data, 'Snapshot restore').catch((err) => {
+        console.warn('[snapshot] Falha ao restaurar permissões:', err?.message || err);
+      });
     }
   } finally {
     runtime.restoring.delete(channel.id);
@@ -206,11 +233,17 @@ async function handleChannelUpdate(oldChannel, newChannel) {
   if (!cfg?.enabled || runtime.restoring.has(newChannel.id)) return;
   const target = cfg.targets?.find((t) => t.channelId === newChannel.id);
   if (!target) return;
-  const snapshot = target.snapshot;
+  const snapshot = parseSnapshot(target.snapshot);
+  if (!snapshot) return;
   const isVoice = newChannel.type === ChannelType.GuildVoice || newChannel.type === ChannelType.GuildStageVoice;
 
   if (cfg.waitForEmpty && isVoice && newChannel.members.size > 0) {
-    await notifyChannel(newChannel, 'Snapshot ativo: assim que a call esvaziar eu restauro as configurações.', SNAPSHOT_WARN_COLOR);
+    const lastWarn = runtime.warnCooldowns.get(newChannel.id) || 0;
+    const now = Date.now();
+    if (now - lastWarn >= SNAPSHOT_WARN_COOLDOWN_MS) {
+      await notifyChannel(newChannel, 'Snapshot ativo: assim que a call esvaziar eu restauro as configurações.', SNAPSHOT_WARN_COLOR);
+      runtime.warnCooldowns.set(newChannel.id, now);
+    }
     runtime.pendingRestore.set(newChannel.id, snapshot);
     return;
   }
@@ -228,10 +261,15 @@ async function handleVoiceStateUpdate(oldState, newState) {
   if (!channel) return;
   if (!runtime.pendingRestore.has(channel.id)) return;
   if (channel.members.size > 0) return;
-  const snapshot = runtime.pendingRestore.get(channel.id);
+  const snapshot = parseSnapshot(runtime.pendingRestore.get(channel.id));
+  if (!snapshot) {
+    runtime.pendingRestore.delete(channel.id);
+    return;
+  }
   await notifyChannel(channel, 'Restaurando as configurações deste canal em 5s...', SNAPSHOT_WARN_COLOR);
   setTimeout(async () => {
-    await restoreChannel(channel, snapshot);
+    const fresh = parseSnapshot(runtime.pendingRestore.get(channel.id)) || snapshot;
+    await restoreChannel(channel, fresh);
     runtime.pendingRestore.delete(channel.id);
   }, 5000);
 }
