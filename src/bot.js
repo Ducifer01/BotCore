@@ -29,6 +29,7 @@ const pointsSystem = require('./features/pointsSystem');
 const pointsInteractions = require('./features/pointsInteractions');
 const pointsConfigFeature = require('./features/pointsConfig');
 const blacklistFeature = require('./features/blacklist');
+const protectionsFeature = require('./features/protections');
 const permissionsManager = require('./features/permissionsManager');
 const { ALLOWED_GUILD_IDS, isGuildAllowed } = require('./config');
 
@@ -101,6 +102,7 @@ const menuHandler = createMenuHandler({
   permissions: { presentMenu: commandPermissionsFeature.presentMenu },
   audit: { presentMenu: auditConfig.presentMenu },
   points: { presentMenu: pointsConfigFeature.presentMenu },
+  protections: { presentMenu: protectionsFeature.presentMenu },
 });
 
 const interactionFeatures = [
@@ -121,9 +123,16 @@ const interactionFeatures = [
   channelCleanerFeature,
   pointsInteractions,
   pointsConfigFeature,
+  protectionsFeature,
   permissionsManager,
   { handleInteraction: handleSupportInteraction },
 ];
+
+try {
+  protectionsFeature.registerSnapshotFeature(client);
+} catch (e) {
+  console.warn('[init] Protections feature não carregada:', e?.message || e);
+}
 
 const messageFeatures = [pointsSystem, userStatsFeature, autoModFeature, roleEditorFeature, instaFeature, moderationCommands, muteCommands];
 const guildUpdateFeatures = [instaFeature];

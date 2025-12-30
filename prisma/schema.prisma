@@ -519,14 +519,40 @@ model SupportTicket {
 }
 
 model VerifiedUserGlobal {
-  id          Int      @id @default(autoincrement())
-  userId      String   @unique
-  verifiedAt  DateTime @default(now())
-  verifiedBy  String?
-  sex         String?
-  photoUrl    String?
+  id             Int      @id @default(autoincrement())
+  userId         String   @unique
+  verifiedAt     DateTime @default(now())
+  verifiedBy     String?
+  sex            String?
+  photoUrl       String?
   photoMessageId String?
   photoChannelId String?
+}
+
+model SnapshotConfig {
+  id           Int     @id @default(autoincrement())
+  guildId      String  @unique
+  enabled      Boolean @default(false)
+  waitForEmpty Boolean @default(true)
+  targets      SnapshotTarget[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([enabled])
+}
+
+model SnapshotTarget {
+  id          Int     @id @default(autoincrement())
+  configId    Int
+  channelId   String
+  channelType String
+  snapshot    String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  config      SnapshotConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+
+  @@unique([configId, channelId])
+  @@index([channelId])
 }
 
 model UserStatGlobal {

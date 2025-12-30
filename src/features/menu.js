@@ -22,16 +22,21 @@ function buildRootSelect() {
       { label: 'Configurar Permissões', value: 'permissions', description: 'Defina quais cargos acessam cada comando' },
       { label: 'Configurar Auditoria', value: 'audit', description: 'Configure logs de auditoria' },
       { label: 'Configurar Pontos', value: 'points', description: 'Sistema de pontos (chat/call/convites)' },
+      { label: 'Configurar Proteções e Snapshots', value: 'protections', description: 'Proteções de canais (snapshots)' },
     ]);
 }
 
-function createMenuHandler({ insta, mute, support, automod, moderation, invites, cleaner, permissions, audit, points }) {
+function createMenuHandler({ insta, mute, support, automod, moderation, invites, cleaner, permissions, audit, points, protections }) {
   async function handleInteraction(interaction, ctx) {
     if (interaction.isStringSelectMenu() && interaction.customId === 'menu:root') {
       return handleRootSelection(interaction, ctx);
     }
     if (interaction.isButton() && interaction.customId === 'menu:back') {
       return handleBack(interaction);
+    }
+    if (typeof protections?.handleInteraction === 'function') {
+      const handled = await protections.handleInteraction(interaction, ctx);
+      if (handled) return true;
     }
     return false;
   }
@@ -72,6 +77,9 @@ function createMenuHandler({ insta, mute, support, automod, moderation, invites,
     }
     if (choice === 'points') {
       return points.presentMenu(interaction, ctx);
+    }
+    if (choice === 'protections') {
+      return protections.presentMenu(interaction, ctx);
     }
     return false;
   }
