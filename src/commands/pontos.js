@@ -7,6 +7,7 @@ const {
   toBigInt,
   userEligible,
   isVoiceChannelAllowed,
+  checkBioKeyword,
 } = require('../services/points');
 
 function formatSeconds(total) {
@@ -26,6 +27,14 @@ module.exports = {
     await ensurePointsConfig(prisma);
     const cfg = await getPointsConfig(prisma);
     const targetUser = interaction.options.getUser('usuario') || interaction.user;
+  const bioStatus = await checkBioKeyword({ prisma, pointsCfg: cfg, userId: targetUser.id, forceRefresh: true });
+    if (bioStatus.active && !bioStatus.allowed) {
+      await interaction.reply({
+        content: `Você precisa ter a palavra-chave \`\`\`${bioStatus.keyword ? bioStatus.keyword : '(defina a palavra-chave)'}\`\`\` no seu perfil.`,
+        ephemeral: true,
+      });
+      return;
+    }
     const balance = await ensureBalance(prisma, cfg, interaction.guildId, targetUser.id);
     const pts = toBigInt(balance.points || 0n);
 

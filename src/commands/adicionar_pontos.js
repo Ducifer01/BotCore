@@ -1,6 +1,6 @@
 const { SlashCommandBuilder } = require('discord.js');
 const { getPrisma } = require('../db');
-const { ensurePointsConfig, getPointsConfig, recordTransaction, ensureBalance, toBigInt, sendLog } = require('../services/points');
+const { ensurePointsConfig, getPointsConfig, recordTransaction, ensureBalance, toBigInt, sendLog, checkBioKeyword } = require('../services/points');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -19,6 +19,13 @@ module.exports = {
     const targetUser = interaction.options.getUser('usuario', true);
     const qty = interaction.options.getInteger('quantidade', true);
     const amount = toBigInt(qty);
+    if (amount > 0n) {
+      const bioStatus = await checkBioKeyword({ prisma, pointsCfg: cfg, userId: targetUser.id });
+      if (bioStatus.active && !bioStatus.allowed) {
+        await interaction.reply({ content: `Não foi possível adicionar pontos. O usuário precisa ter a palavra-chave ${bioStatus.keyword ? `"${bioStatus.keyword}"` : '(defina a palavra-chave)'} no perfil.`, ephemeral: true });
+        return;
+      }
+    }
     await recordTransaction(prisma, cfg, {
       guildId: interaction.guildId,
       userId: targetUser.id,

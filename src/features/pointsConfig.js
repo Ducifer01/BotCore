@@ -13,6 +13,7 @@ const {
 } = require('discord.js');
 const { invalidateCache } = require('./pointsSystem');
 const pointsService = require('../services/points');
+const bioCheckerService = require('../services/bioChecker');
 
 function buildEmbed(cfg) {
   return new EmbedBuilder()
@@ -29,9 +30,19 @@ function buildEmbed(cfg) {
       `Roles participante: ${cfg?.participantRoles?.length || 0}`,
       `Roles ignorados: ${cfg?.ignoredRoles?.length || 0} | Usuários ignorados: ${cfg?.ignoredUsers?.length || 0}`,
       `Logs admin: ${cfg?.logsAdminChannelId ? `<#${cfg.logsAdminChannelId}>` : 'nenhum'} | Logs usuários: ${cfg?.logsUsuariosChannelId ? `<#${cfg.logsUsuariosChannelId}>` : 'nenhum'}`,
+      formatBioCheckerLine(cfg?.bioCheckerConfig),
       `Leaderboard refresh: ${cfg?.leaderboardRefreshMinutes || 10} min`,
     ].join('\n'))
     .setTimestamp(new Date());
+}
+
+function formatBioCheckerLine(bioCfg) {
+  if (!bioCfg) return 'BioChecker: não configurado';
+  const status = bioCfg.enabled ? 'Ativado' : 'Desativado';
+  const keyword = bioCfg.keyword ? `"${bioCfg.keyword}"` : '—';
+  const strict = bioCfg.strictMode === false ? 'fail-open' : 'fail-closed';
+  const ttlMin = Math.max(1, Math.round((bioCfg.cacheTtlMs || 600000) / 60000));
+  return `BioChecker: ${status} | keyword: ${keyword} | strict: ${strict} | cache: ${ttlMin} min`;
 }
 
 function buildHomeComponents(cfg) {
@@ -62,6 +73,7 @@ function buildHomeComponents(cfg) {
       new ButtonBuilder().setCustomId('menu:points:voicecategories').setLabel('Categorias de voz').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('menu:points:voicechannels').setLabel('Canais de voz').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('menu:points:rules').setLabel('Enviar Regras').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('menu:points:biochecker').setLabel('BioChecker').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('menu:back').setLabel('Voltar').setStyle(ButtonStyle.Secondary),
     ),
   ];
@@ -114,6 +126,27 @@ async function handleInteraction(interaction, ctx) {
   if (interaction.isButton() && interaction.customId === 'menu:points:voicecategories') {
     return promptVoiceCategories(interaction, ctx);
   }
+  if (interaction.isButton() && interaction.customId === 'menu:points:biochecker') {
+    return presentBioChecker(interaction, ctx);
+  }
+  if (interaction.isButton() && interaction.customId === 'menu:points:bio:toggle') {
+    return toggleBioChecker(interaction, ctx);
+  }
+  if (interaction.isButton() && interaction.customId === 'menu:points:bio:strict') {
+    return toggleBioStrictMode(interaction, ctx);
+  }
+  if (interaction.isButton() && interaction.customId === 'menu:points:bio:keyword') {
+    return showBioModal(interaction, ctx, 'keyword');
+  }
+  if (interaction.isButton() && interaction.customId === 'menu:points:bio:token') {
+    return showBioModal(interaction, ctx, 'token');
+  }
+  if (interaction.isButton() && interaction.customId === 'menu:points:bio:ttl') {
+    return showBioModal(interaction, ctx, 'ttl');
+  }
+  if (interaction.isButton() && interaction.customId === 'menu:points:bio:test') {
+    return testBioToken(interaction, ctx);
+  }
   if (interaction.isButton() && interaction.customId === 'menu:points:leaderboard') {
     return promptLeaderboard(interaction, ctx);
   }
@@ -122,6 +155,15 @@ async function handleInteraction(interaction, ctx) {
   }
   if (interaction.isModalSubmit() && interaction.customId === 'menu:points:numbers2:modal') {
     return handleNumbersModal(interaction, ctx, 'numbers2');
+  }
+  if (interaction.isModalSubmit() && interaction.customId === 'menu:points:bio:keyword:modal') {
+    return handleBioModal(interaction, ctx, 'keyword');
+  }
+  if (interaction.isModalSubmit() && interaction.customId === 'menu:points:bio:token:modal') {
+    return handleBioModal(interaction, ctx, 'token');
+  }
+  if (interaction.isModalSubmit() && interaction.customId === 'menu:points:bio:ttl:modal') {
+    return handleBioModal(interaction, ctx, 'ttl');
   }
   if (interaction.isModalSubmit() && interaction.customId === 'menu:points:leaderboard:modal') {
     return handleLeaderboardModal(interaction, ctx);
@@ -605,6 +647,144 @@ async function promptLeaderboard(interaction, ctx) {
     .setTitle('Refresh do painel (minutos)');
   modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('refresh').setLabel('Minutos').setStyle(TextInputStyle.Short).setRequired(true)));
   await interaction.showModal(modal).catch(() => {});
+  return true;
+}
+
+function buildBioEmbed(cfg) {
+  const bio = cfg?.bioCheckerConfig || {};
+  const ttlMin = Math.max(1, Math.round((bio.cacheTtlMs || 600000) / 60000));
+  const strict = bio.strictMode === false ? 'fail-open (libera se erro)' : 'fail-closed (bloqueia se erro)';
+  const lines = [
+    `Status: **${bio.enabled ? 'Ativado' : 'Desativado'}**`,
+    `Palavra-chave: ${bio.keyword ? `"${bio.keyword}"` : '—'}`,
+    `Token selfbot: ${bio.selfToken ? 'Configurado' : 'Não configurado'}`,
+    `Modo estrito: ${strict}`,
+    `Cache TTL: ${ttlMin} min`,
+    bio.lastSuccessAt ? `Último sucesso: <t:${Math.floor(new Date(bio.lastSuccessAt).getTime() / 1000)}:R>` : 'Último sucesso: —',
+    bio.lastError ? `Último erro: ${bio.lastError}` : 'Último erro: —',
+  ];
+  return new EmbedBuilder().setTitle('BioChecker - Sistema de Pontos').setDescription(lines.join('\n')).setColor(bio.enabled ? 0x2ecc71 : 0xe74c3c).setTimestamp(new Date());
+}
+
+function buildBioComponents(cfg) {
+  const bio = cfg?.bioCheckerConfig || {};
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('menu:points:bio:toggle').setLabel(bio.enabled ? 'Desativar' : 'Ativar').setStyle(bio.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('menu:points:bio:strict').setLabel(bio.strictMode === false ? 'Fail-open' : 'Fail-closed').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('menu:points:bio:keyword').setLabel('Palavra-chave').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('menu:points:bio:token').setLabel('Token self').setStyle(ButtonStyle.Secondary),
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('menu:points:bio:ttl').setLabel('Cache (min)').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('menu:points:bio:test').setLabel('Testar token').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('menu:back').setLabel('Voltar').setStyle(ButtonStyle.Secondary),
+    ),
+  ];
+}
+
+async function loadConfigWithBio(prisma) {
+  const cfg = await pointsService.getPointsConfig(prisma);
+  if (!cfg.bioCheckerConfig) {
+    await pointsService.ensureBioCheckerConfig(prisma, cfg.id).catch(() => {});
+    return pointsService.getPointsConfig(prisma);
+  }
+  return cfg;
+}
+
+async function presentBioChecker(interaction, ctx) {
+  await interaction.deferUpdate().catch(() => {});
+  const prisma = ctx.getPrisma();
+  const cfg = await loadConfigWithBio(prisma);
+  await interaction.editReply({ embeds: [buildBioEmbed(cfg)], components: buildBioComponents(cfg) }).catch(() => {});
+  return true;
+}
+
+async function toggleBioChecker(interaction, ctx) {
+  await interaction.deferUpdate().catch(() => {});
+  const prisma = ctx.getPrisma();
+  const cfg = await loadConfigWithBio(prisma);
+  const bio = cfg.bioCheckerConfig;
+  await prisma.pointsBioCheckerConfig.update({ where: { id: bio.id }, data: { enabled: !bio.enabled } });
+  invalidateCache();
+  const updated = await loadConfigWithBio(prisma);
+  await interaction.editReply({ embeds: [buildBioEmbed(updated)], components: buildBioComponents(updated) }).catch(() => {});
+  return true;
+}
+
+async function toggleBioStrictMode(interaction, ctx) {
+  await interaction.deferUpdate().catch(() => {});
+  const prisma = ctx.getPrisma();
+  const cfg = await loadConfigWithBio(prisma);
+  const bio = cfg.bioCheckerConfig;
+  const next = bio.strictMode === false;
+  await prisma.pointsBioCheckerConfig.update({ where: { id: bio.id }, data: { strictMode: next } });
+  invalidateCache();
+  const updated = await loadConfigWithBio(prisma);
+  await interaction.editReply({ embeds: [buildBioEmbed(updated)], components: buildBioComponents(updated) }).catch(() => {});
+  return true;
+}
+
+async function showBioModal(interaction, ctx, kind) {
+  const prisma = ctx.getPrisma();
+  const cfg = await loadConfigWithBio(prisma);
+  const bio = cfg.bioCheckerConfig;
+  const modal = new ModalBuilder()
+    .setCustomId(`menu:points:bio:${kind}:modal`)
+    .setTitle(kind === 'keyword' ? 'Palavra-chave do BioChecker' : kind === 'token' ? 'Token selfbot' : 'Cache (minutos)');
+  if (kind === 'keyword') {
+    modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('keyword').setLabel('Palavra-chave').setStyle(TextInputStyle.Short).setRequired(true).setValue(bio.keyword || '')));
+  } else if (kind === 'token') {
+    modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('token').setLabel('Token da conta (self)').setStyle(TextInputStyle.Paragraph).setRequired(true).setValue(bio.selfToken || '')));
+  } else {
+    const ttlMinutes = Math.max(1, Math.round((bio.cacheTtlMs || 600000) / 60000));
+    modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ttl').setLabel('Cache em minutos').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(ttlMinutes))));
+  }
+  await interaction.showModal(modal).catch(() => {});
+  return true;
+}
+
+async function handleBioModal(interaction, ctx, kind) {
+  await interaction.deferUpdate().catch(() => {});
+  const prisma = ctx.getPrisma();
+  const cfg = await loadConfigWithBio(prisma);
+  const bio = cfg.bioCheckerConfig;
+  const data = {};
+  if (kind === 'keyword') {
+    const value = (interaction.fields.getTextInputValue('keyword') || '').trim();
+    data.keyword = value || null;
+  } else if (kind === 'token') {
+    const value = (interaction.fields.getTextInputValue('token') || '').trim();
+    data.selfToken = value || null;
+  } else {
+    const raw = (interaction.fields.getTextInputValue('ttl') || '').trim();
+    const minutes = Number.parseInt(raw, 10);
+    const ttlMinutes = Number.isFinite(minutes) && minutes > 0 ? minutes : 10;
+    data.cacheTtlMs = ttlMinutes * 60_000;
+  }
+  await prisma.pointsBioCheckerConfig.update({ where: { id: bio.id }, data });
+  invalidateCache();
+  const updated = await loadConfigWithBio(prisma);
+  await interaction.editReply({ embeds: [buildBioEmbed(updated)], components: buildBioComponents(updated) }).catch(() => {});
+  return true;
+}
+
+async function testBioToken(interaction, ctx) {
+  await interaction.deferUpdate().catch(() => {});
+  const prisma = ctx.getPrisma();
+  const cfg = await loadConfigWithBio(prisma);
+  const result = await bioCheckerService.testToken({ prisma, pointsCfg: cfg, userId: interaction.user.id });
+  const keyword = cfg?.bioCheckerConfig?.keyword;
+  let content;
+  if (result.ok) {
+    const { fields } = result;
+    const hasKeyword = result.hasKeyword ? 'contém' : 'não contém';
+    content = `Token válido (HTTP ${result.status || 200}). Bio ${keyword ? hasKeyword + ` a palavra-chave "${keyword}"` : 'verificada'}.\nBio: ${fields?.bio || '—'}\nPronouns: ${fields?.pronouns || '—'}\nGlobal name: ${fields?.globalName || '—'}`;
+  } else {
+    content = `Falha ao testar token: ${result.message || `HTTP ${result.status || 'erro'}`}`;
+  }
+  await interaction.followUp({ content, ephemeral: true }).catch(() => {});
+  await interaction.editReply({ embeds: [buildBioEmbed(cfg)], components: buildBioComponents(cfg) }).catch(() => {});
   return true;
 }
 

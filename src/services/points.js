@@ -1,6 +1,7 @@
 const { getPrisma } = require('../db');
 const { ensureGlobalConfig, getGlobalConfig } = require('./globalConfig');
 const { ChannelType, EmbedBuilder } = require('discord.js');
+const bioChecker = require('./bioChecker');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MINUTE_MS = 60 * 1000;
@@ -31,6 +32,7 @@ async function ensurePointsConfig(prisma = getPrisma()) {
       },
     });
   }
+  await bioChecker.ensureBioCheckerConfig(prisma, cfg.id).catch(() => {});
   return cfg;
 }
 
@@ -44,9 +46,16 @@ async function getPointsConfig(prisma = getPrisma()) {
       voiceChannels: true,
       voiceCategories: true,
       leaderboardPanels: true,
+      bioCheckerConfig: true,
     },
   });
-  if (cfg) return cfg;
+  if (cfg) {
+    if (!cfg.bioCheckerConfig) {
+      await bioChecker.ensureBioCheckerConfig(prisma, cfg.id).catch(() => {});
+      return getPointsConfig(prisma);
+    }
+    return cfg;
+  }
   return ensurePointsConfig(prisma);
 }
 
@@ -137,6 +146,10 @@ function userEligible(cfg, member) {
     }
   }
   return true;
+}
+
+async function ensureBioAllowed(prisma, cfg, userId, options = {}) {
+  return bioChecker.checkUserKeyword({ prisma, pointsCfg: cfg, userId, forceRefresh: options.forceRefresh });
 }
 
 async function recordTransaction(prisma, cfg, { guildId, userId, amount, type, source = 'SYSTEM', reason, actorId, metadata }) {
@@ -230,6 +243,8 @@ async function handleChatMessage({ message, prisma, cfg }) {
   if (!message.guild || !message.member) return false;
   if (!userEligible(cfg, message.member)) return false;
   if (await isFrozen(prisma, cfg, message.guildId, message.author.id)) return false;
+  const bioStatus = await ensureBioAllowed(prisma, cfg, message.author.id);
+  if (!bioStatus.allowed) return false;
   const guildId = message.guildId;
   const userId = message.author.id;
   if (cfg.chatChannels?.length) {
@@ -329,6 +344,8 @@ async function tickVoice({ client, prisma, cfg }) {
         const guildId = guild.id;
         const userId = member.id;
         if (await isFrozen(prisma, cfg, guildId, userId)) continue;
+          const bioStatus = await ensureBioAllowed(prisma, cfg, userId);
+          if (!bioStatus.allowed) continue;
         const balance = await ensureBalance(prisma, cfg, guildId, userId);
         let session = await prisma.pointsVoiceSession.findUnique({ where: { globalConfigId_guildId_userId: { globalConfigId, guildId, userId } } });
         if (!session) {
@@ -385,7 +402,13 @@ async function handleInviteJoin({ guildId, inviterId, inviteeId, invitedAt, acco
 
   // Aprovação instantânea se tempoServerHours <= 0
   if (tempoServerHours <= 0) {
-    const amount = toBigInt(cfg.pontosConvites || 0n);
+    let amount = toBigInt(cfg.pontosConvites || 0n);
+    if (amount > 0n) {
+      const bioStatus = await ensureBioAllowed(prisma, cfg, inviterId);
+      if (!bioStatus.allowed) {
+        amount = 0n;
+      }
+    }
     const now = new Date();
     await prisma.pointsInviteLedger.upsert({
       where: { guildId_inviteeId: { guildId, inviteeId } },
@@ -485,8 +508,16 @@ async function confirmPendingInvites({ prisma, cfg, client }) {
         await prisma.pointsInviteLedger.update({ where: { id: entry.id }, data: { status: 'REVOKED', revokedAt: new Date(), revokedReason: 'SAIU_ANTES_CONFIRMACAO' } });
         continue;
       }
-      const amount = toBigInt(cfg.pontosConvites || 0n);
-      await recordTransaction(prisma, cfg, { guildId: entry.guildId, userId: entry.inviterId, amount, type: 'INVITE', source: 'SYSTEM', reason: 'Convite válido' });
+      let amount = toBigInt(cfg.pontosConvites || 0n);
+      if (amount > 0n) {
+        const bioStatus = await ensureBioAllowed(prisma, cfg, entry.inviterId);
+        if (!bioStatus.allowed) {
+          amount = 0n;
+        }
+      }
+      if (amount !== 0n) {
+        await recordTransaction(prisma, cfg, { guildId: entry.guildId, userId: entry.inviterId, amount, type: 'INVITE', source: 'SYSTEM', reason: 'Convite válido' });
+      }
       await prisma.pointsInviteLedger.update({ where: { id: entry.id }, data: { status: 'CONFIRMED', confirmedAt: new Date(), pointsAwarded: amount } });
     }
   }
@@ -532,4 +563,8 @@ module.exports = {
   userEligible,
   toBigInt,
   isVoiceChannelAllowed,
+  ensureBioAllowed,
+  checkBioKeyword: bioChecker.checkUserKeyword,
+  getBioCheckerConfig: bioChecker.getBioCheckerConfig,
+  ensureBioCheckerConfig: bioChecker.ensureBioCheckerConfig,
 };
