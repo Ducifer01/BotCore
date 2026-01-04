@@ -128,11 +128,7 @@ const interactionFeatures = [
   { handleInteraction: handleSupportInteraction },
 ];
 
-try {
-  protectionsFeature.registerSnapshotFeature(client);
-} catch (e) {
-  console.warn('[init] Protections feature não carregada:', e?.message || e);
-}
+// Snapshots/rollback removidos temporariamente; o menu ficará disponível para futuros módulos.
 
 const messageFeatures = [pointsSystem, userStatsFeature, autoModFeature, roleEditorFeature, instaFeature, moderationCommands, muteCommands];
 const guildUpdateFeatures = [instaFeature];

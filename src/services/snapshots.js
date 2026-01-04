@@ -1,12 +1,23 @@
 const { getPrisma } = require('../db');
 
+function safeParse(snapshot) {
+  if (!snapshot) return null;
+  if (typeof snapshot !== 'string') return snapshot;
+  try {
+    return JSON.parse(snapshot);
+  } catch (err) {
+    console.warn('[snapshot] Falha ao parsear snapshot salvo:', err?.message || err);
+    return null;
+  }
+}
+
 function normalizeConfig(config) {
   if (!config) return config;
   return {
     ...config,
     targets: (config.targets || []).map((t) => ({
       ...t,
-      snapshot: typeof t.snapshot === 'string' ? JSON.parse(t.snapshot) : t.snapshot,
+      snapshot: safeParse(t.snapshot),
     })),
   };
 }
@@ -60,6 +71,22 @@ async function loadConfig(guildId, prisma = getPrisma()) {
   return getOrCreateConfig(guildId, prisma);
 }
 
+async function getConfigAndTargetByChannel(guildId, channelId, prisma = getPrisma()) {
+  const target = await prisma.snapshotTarget.findFirst({
+    where: { channelId, config: { guildId } },
+    include: { config: true },
+  });
+  if (!target) return null;
+  const config = normalizeConfig(target.config);
+  return {
+    config,
+    target: {
+      ...target,
+      snapshot: safeParse(target.snapshot),
+    },
+  };
+}
+
 module.exports = {
   getOrCreateConfig,
   setEnabled,
@@ -67,4 +94,5 @@ module.exports = {
   setTargets,
   loadConfig,
   normalizeConfig,
+  getConfigAndTargetByChannel,
 };
