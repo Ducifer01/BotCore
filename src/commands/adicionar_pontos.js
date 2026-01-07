@@ -6,8 +6,9 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('adicionar_pontos')
     .setDescription('Adiciona pontos a um usuário')
-    .addUserOption((opt) => opt.setName('usuario').setDescription('Usuário alvo').setRequired(true))
-    .addIntegerOption((opt) => opt.setName('quantidade').setDescription('Quantidade de pontos').setRequired(true)),
+      .addUserOption((opt) => opt.setName('usuario').setDescription('Usuário alvo').setRequired(true))
+      .addIntegerOption((opt) => opt.setName('quantidade').setDescription('Quantidade de pontos').setRequired(true))
+      .addStringOption((opt) => opt.setName('motivo').setDescription('Motivo da adição').setRequired(false)),
   async execute(interaction) {
     const prisma = getPrisma();
     const POSSE_USER_ID = String(process.env.POSSE_USER_ID || '').trim();
@@ -17,7 +18,8 @@ module.exports = {
     await ensurePointsConfig(prisma);
     const cfg = await getPointsConfig(prisma);
     const targetUser = interaction.options.getUser('usuario', true);
-    const qty = interaction.options.getInteger('quantidade', true);
+  const qty = interaction.options.getInteger('quantidade', true);
+  const motivo = interaction.options.getString('motivo') || null;
     const amount = toBigInt(qty);
     if (amount > 0n) {
       const bioStatus = await checkBioKeyword({ prisma, pointsCfg: cfg, userId: targetUser.id });
@@ -32,16 +34,34 @@ module.exports = {
       amount,
       type: 'ADMIN_ADD',
       source: 'ADMIN',
-      reason: 'Ajuste manual',
+      reason: motivo || 'Ajuste manual',
       actorId: interaction.user.id,
     });
     const balance = await ensureBalance(prisma, cfg, interaction.guildId, targetUser.id);
+    // create immutable points log entry
+    try {
+      await prisma.pointsLog.create({
+        data: {
+          globalConfigId: cfg.globalConfigId || cfg.id,
+          guildId: interaction.guildId,
+          userId: targetUser.id,
+          change: amount,
+          totalAfter: toBigInt(balance.points || 0n),
+          actorId: interaction.user.id,
+          motivo,
+        },
+      });
+    } catch (err) {
+      // non-fatal; log server-side
+      console.warn('[points] falha ao gravar PointsLog', err?.message || err);
+    }
     await interaction.reply({ content: `Adicionado **${amount}** pontos para ${targetUser}. Total: **${toBigInt(balance.points)}**`, ephemeral: true });
     await sendLog(interaction.client, cfg.logsAdminChannelId, {
       embeds: [
         {
           title: 'Pontos adicionados manualmente',
           description: `${interaction.user} adicionou **${amount}** pontos para ${targetUser} (total: **${toBigInt(balance.points)}**).`,
+          fields: motivo ? [{ name: 'Motivo', value: motivo }] : undefined,
           timestamp: new Date().toISOString(),
           color: 0x2ecc71,
         },

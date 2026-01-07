@@ -1,6 +1,6 @@
 // Prisma schema for SQLite
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   binaryTargets = ["debian-openssl-3.0.x", "native"]
 }
 
@@ -9,116 +9,116 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-
 // Configuração 100% global: eliminar distinções por guild
 model GlobalConfig {
-  id                     Int      @id @default(autoincrement())
+  id                            Int                       @id @default(autoincrement())
   // Verificação
-  verifyPanelChannelId   String?
-  mainRoleId             String?
-  verifiedRoleId         String?
+  verifyPanelChannelId          String?
+  mainRoleId                    String?
+  verifiedRoleId                String?
   // Insta
-  instaBoysChannelId     String?
-  instaGirlsChannelId    String?
-  photosChannelId        String?
-  photosMaleChannelId    String?
-  photosFemaleChannelId  String?
+  instaBoysChannelId            String?
+  instaGirlsChannelId           String?
+  photosChannelId               String?
+  photosMaleChannelId           String?
+  photosFemaleChannelId         String?
   // Mute feature (global)
-  muteVoiceRoleId        String?  // Cargo aplicado a usuários silenciados por mutecall
-  muteVoiceUnlockChannelId String? // Canal de voz para desbloqueio automático
-  muteVoiceLogChannelId  String?
-  muteChatRoleId         String?  // Cargo aplicado por mute de chat
-  muteChatLogChannelId   String?
+  muteVoiceRoleId               String? // Cargo aplicado a usuários silenciados por mutecall
+  muteVoiceUnlockChannelId      String? // Canal de voz para desbloqueio automático
+  muteVoiceLogChannelId         String?
+  muteChatRoleId                String? // Cargo aplicado por mute de chat
+  muteChatLogChannelId          String?
   // Suporte (global)
-  supportPanelChannelId String?
-  supportLogChannelId   String?
-  supportRolesGlobal    SupportRoleGlobal[]
+  supportPanelChannelId         String?
+  supportLogChannelId           String?
+  supportRolesGlobal            SupportRoleGlobal[]
   // Auditoria
-  auditManualMuteLogChannelId String?
+  auditManualMuteLogChannelId   String?
   // Relacionamentos globais
-  ticketPingRolesGlobal TicketPingRoleGlobal[]
+  ticketPingRolesGlobal         TicketPingRoleGlobal[]
   // AutoMod
-  autoModConfig        AutoModConfig?
+  autoModConfig                 AutoModConfig?
   // Moderação
-  moderationConfig     ModerationConfig?
-  castigoRecords       CastigoRecord[]
+  moderationConfig              ModerationConfig?
+  castigoRecords                CastigoRecord[]
   // Convites
-  inviteTrackingEnabled   Boolean       @default(false)
-  inviteRankingEnabled    Boolean       @default(false)
-  inviteRankingChannelId  String?
-  inviteRankingGuildId    String?
-  inviteRankingMessageId  String?
-  inviteRankingLastRefresh DateTime?
-  inviteLogChannelId      String?
-  inviteAccountAgeFilterEnabled Boolean @default(false)
-  inviteAccountAgeMinDays  Int         @default(7)
-  inviteStats              InviteStat[]
-  inviteEvents             InviteEvent[]
+  inviteTrackingEnabled         Boolean                   @default(false)
+  inviteRankingEnabled          Boolean                   @default(false)
+  inviteRankingChannelId        String?
+  inviteRankingGuildId          String?
+  inviteRankingMessageId        String?
+  inviteRankingLastRefresh      DateTime?
+  inviteLogChannelId            String?
+  inviteAccountAgeFilterEnabled Boolean                   @default(false)
+  inviteAccountAgeMinDays       Int                       @default(7)
+  inviteStats                   InviteStat[]
+  inviteEvents                  InviteEvent[]
   // Limpeza de canais
-  channelCleanerPanels     ChannelCleanerPanel[]
+  channelCleanerPanels          ChannelCleanerPanel[]
   // Mute config avançada
-  mutePermissions      MutePermission[]
-  commandPermissions   CommandPermissionGlobal[]
-  voiceMutes           VoiceMute[]
-  chatMutes            ChatMute[]
-  antiSpamConfig       AntiSpamConfig?
+  mutePermissions               MutePermission[]
+  commandPermissions            CommandPermissionGlobal[]
+  voiceMutes                    VoiceMute[]
+  chatMutes                     ChatMute[]
+  antiSpamConfig                AntiSpamConfig?
   // Sistema de pontos
-  pointsConfig         PointsConfig?
-  pointsLeaderboardPanels PointsLeaderboardPanel[]
-  pointBalances        PointsBalance[]
-  pointTransactions    PointsTransaction[]
-  pointPunishments     PointsPunishment[]
-  pointInvites         PointsInviteLedger[]
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  pointsConfig                  PointsConfig?
+  pointsLeaderboardPanels       PointsLeaderboardPanel[]
+  pointBalances                 PointsBalance[]
+  pointTransactions             PointsTransaction[]
+  pointsLogs                    PointsLog[]
+  pointPunishments              PointsPunishment[]
+  pointInvites                  PointsInviteLedger[]
+  createdAt                     DateTime                  @default(now())
+  updatedAt                     DateTime                  @updatedAt
 }
 
 model PointsConfig {
-  id                         Int       @id @default(autoincrement())
-  globalConfigId             Int       @unique
-  enabled                    Boolean   @default(false)
-  mode                       String    @default("GLOBAL")
-  pontosChat                 BigInt    @default(2)
-  pontosCall                 BigInt    @default(5)
-  pontosConvites             BigInt    @default(50)
-  cooldownChatMinutes        Int       @default(2)
-  limitDailyChat             BigInt?
-  tempoCallMinutes           Int       @default(5)
-  tempoServerHours           Int       @default(24)
-  idadeContaDias             Int       @default(7)
-  minUserCall                Int       @default(0)
-  diasConvite                Int       @default(7)
-  qtdCaracteresMin           Int       @default(20)
-  logsAdminChannelId         String?
-  logsUsuariosChannelId      String?
-  leaderboardRefreshMinutes  Int       @default(10)
-  leaderboardLastRefresh     DateTime?
-  bioCheckerConfig           PointsBioCheckerConfig?
-  createdAt                  DateTime  @default(now())
-  updatedAt                  DateTime  @updatedAt
-  inviteAntiReentryEnabled   Boolean   @default(true)
-  globalConfig               GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
-  participantRoles           PointsParticipantRole[]
-  ignoredRoles               PointsIgnoredRole[]
-  ignoredUsers               PointsIgnoredUser[]
-  chatChannels               PointsChatChannel[]
-  voiceChannels              PointsVoiceChannel[]
-  voiceCategories            PointsVoiceCategory[]
-  leaderboardPanels          PointsLeaderboardPanel[]
+  id                        Int                      @id @default(autoincrement())
+  globalConfigId            Int                      @unique
+  enabled                   Boolean                  @default(false)
+  mode                      String                   @default("GLOBAL")
+  pontosChat                BigInt                   @default(2)
+  pontosCall                BigInt                   @default(5)
+  pontosConvites            BigInt                   @default(50)
+  cooldownChatMinutes       Int                      @default(2)
+  limitDailyChat            BigInt?
+  tempoCallMinutes          Int                      @default(5)
+  tempoServerHours          Int                      @default(24)
+  idadeContaDias            Int                      @default(7)
+  minUserCall               Int                      @default(0)
+  diasConvite               Int                      @default(7)
+  qtdCaracteresMin          Int                      @default(20)
+  logsAdminChannelId        String?
+  logsUsuariosChannelId     String?
+  leaderboardRefreshMinutes Int                      @default(10)
+  leaderboardLastRefresh    DateTime?
+  bioCheckerConfig          PointsBioCheckerConfig?
+  createdAt                 DateTime                 @default(now())
+  updatedAt                 DateTime                 @updatedAt
+  inviteAntiReentryEnabled  Boolean                  @default(true)
+  globalConfig              GlobalConfig             @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
+  participantRoles          PointsParticipantRole[]
+  ignoredRoles              PointsIgnoredRole[]
+  ignoredUsers              PointsIgnoredUser[]
+  chatChannels              PointsChatChannel[]
+  voiceChannels             PointsVoiceChannel[]
+  voiceCategories           PointsVoiceCategory[]
+  leaderboardPanels         PointsLeaderboardPanel[]
 }
 
 model PointsBioCheckerConfig {
-  id             Int      @id @default(autoincrement())
-  pointsConfigId Int      @unique
-  enabled        Boolean  @default(false)
+  id             Int          @id @default(autoincrement())
+  pointsConfigId Int          @unique
+  enabled        Boolean      @default(false)
   keyword        String?
   selfToken      String?
-  strictMode     Boolean  @default(true)
-  cacheTtlMs     Int      @default(600000)
+  strictMode     Boolean      @default(true)
+  cacheTtlMs     Int          @default(600000)
   lastSuccessAt  DateTime?
   lastError      String?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
   pointsConfig   PointsConfig @relation(fields: [pointsConfigId], references: [id], onDelete: Cascade)
 }
 
@@ -183,15 +183,15 @@ model PointsVoiceCategory {
 }
 
 model PointsBalance {
-  id             Int       @id @default(autoincrement())
+  id             Int                 @id @default(autoincrement())
   globalConfigId Int
   guildId        String
   userId         String
-  points         BigInt    @default(0)
+  points         BigInt              @default(0)
   frozenUntil    DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  config         GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  config         GlobalConfig        @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
   transactions   PointsTransaction[]
   punishments    PointsPunishment[]
   chatActivity   PointsChatActivity?
@@ -202,34 +202,34 @@ model PointsBalance {
 }
 
 model PointsChatActivity {
-  id             Int          @id @default(autoincrement())
-  globalConfigId Int
-  guildId        String
-  userId         String
-  lastMessageAt  DateTime?
+  id              Int           @id @default(autoincrement())
+  globalConfigId  Int
+  guildId         String
+  userId          String
+  lastMessageAt   DateTime?
   lastMessageHash String?
-  dailyPoints    BigInt       @default(0)
-  dailyDate      DateTime?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  balance        PointsBalance @relation(fields: [globalConfigId, guildId, userId], references: [globalConfigId, guildId, userId], onDelete: Cascade)
+  dailyPoints     BigInt        @default(0)
+  dailyDate       DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  balance         PointsBalance @relation(fields: [globalConfigId, guildId, userId], references: [globalConfigId, guildId, userId], onDelete: Cascade)
 
   @@unique([globalConfigId, guildId, userId])
   @@index([guildId, userId])
 }
 
 model PointsVoiceSession {
-  id             Int          @id @default(autoincrement())
-  globalConfigId Int
-  guildId        String
-  userId         String
-  channelId      String?
-  startedAt      DateTime?
-  accumulatedSeconds Int      @default(0)
-  lastCheckedAt  DateTime?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  balance        PointsBalance @relation(fields: [globalConfigId, guildId, userId], references: [globalConfigId, guildId, userId], onDelete: Cascade)
+  id                 Int           @id @default(autoincrement())
+  globalConfigId     Int
+  guildId            String
+  userId             String
+  channelId          String?
+  startedAt          DateTime?
+  accumulatedSeconds Int           @default(0)
+  lastCheckedAt      DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  balance            PointsBalance @relation(fields: [globalConfigId, guildId, userId], references: [globalConfigId, guildId, userId], onDelete: Cascade)
 
   @@unique([globalConfigId, guildId, userId])
   @@index([guildId, userId])
@@ -254,20 +254,20 @@ model PointsTransaction {
 }
 
 model PointsPunishment {
-  id             Int          @id @default(autoincrement())
-  globalConfigId Int
-  guildId        String
-  userId         String
-  moderatorId    String?
-  reason         String?
-  expiresAt      DateTime?
-  liftedAt       DateTime?
+  id               Int            @id @default(autoincrement())
+  globalConfigId   Int
+  guildId          String
+  userId           String
+  moderatorId      String?
+  reason           String?
+  expiresAt        DateTime?
+  liftedAt         DateTime?
   commandChannelId String?
-  active         Boolean      @default(true)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  config         GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
-  balance        PointsBalance? @relation(fields: [globalConfigId, guildId, userId], references: [globalConfigId, guildId, userId])
+  active           Boolean        @default(true)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  config           GlobalConfig   @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
+  balance          PointsBalance? @relation(fields: [globalConfigId, guildId, userId], references: [globalConfigId, guildId, userId])
 
   @@index([guildId, userId, active])
   @@index([expiresAt])
@@ -287,41 +287,59 @@ model PointsInviteLedger {
   status         String       @default("PENDING")
   config         GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
 
+  @@unique([guildId, inviteeId])
   @@index([guildId, inviterId])
   @@index([status, invitedAt])
-  @@unique([guildId, inviteeId])
+}
+
+model PointsLog {
+  id              Int          @id @default(autoincrement())
+  globalConfigId  Int
+  guildId         String
+  userId          String
+  change          BigInt
+  totalAfter      BigInt
+  actorId         String
+  motivo          String?
+  evidenceUrl     String?
+  referencedLogId Int?
+  createdAt       DateTime     @default(now())
+  config          GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
+
+  @@index([guildId])
+  @@index([userId])
 }
 
 model PointsLeaderboardPanel {
-  id             Int          @id @default(autoincrement())
+  id             Int           @id @default(autoincrement())
   globalConfigId Int
   pointsConfigId Int?
   guildId        String
   channelId      String
   messageId      String?
-  refreshMinutes Int          @default(10)
+  refreshMinutes Int           @default(10)
   lastRefreshAt  DateTime?
-  isActive       Boolean      @default(true)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  config         GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
+  isActive       Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  config         GlobalConfig  @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
   pointsConfig   PointsConfig? @relation(fields: [pointsConfigId], references: [id], onDelete: Cascade)
 
-  @@index([guildId, isActive])
   @@unique([guildId, channelId, messageId])
+  @@index([guildId, isActive])
 }
 
 model TicketPingRoleGlobal {
-  id              Int  @id @default(autoincrement())
-  globalConfigId  Int
-  roleId          String
-  config          GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
+  id             Int          @id @default(autoincrement())
+  globalConfigId Int
+  roleId         String
+  config         GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
 
   @@unique([globalConfigId, roleId])
 }
 
 model SupportRoleGlobal {
-  id             Int  @id @default(autoincrement())
+  id             Int          @id @default(autoincrement())
   globalConfigId Int
   roleId         String
   config         GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
@@ -352,64 +370,64 @@ model AutoModBlockedWord {
 }
 
 model AntiSpamConfig {
-  id                     Int      @id @default(autoincrement())
-  globalConfigId         Int      @unique
-  enabled                Boolean  @default(false)
-  messageLimit           Int      @default(5)
-  perSeconds             Int      @default(5)
-  punishmentMode         String   @default("MUTE")
-  muteDurationSeconds    Int      @default(300)
-  timeoutDurationSeconds Int      @default(300)
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
-  config                 GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
+  id                     Int                      @id @default(autoincrement())
+  globalConfigId         Int                      @unique
+  enabled                Boolean                  @default(false)
+  messageLimit           Int                      @default(5)
+  perSeconds             Int                      @default(5)
+  punishmentMode         String                   @default("MUTE")
+  muteDurationSeconds    Int                      @default(300)
+  timeoutDurationSeconds Int                      @default(300)
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+  config                 GlobalConfig             @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
   ignoredChannels        AntiSpamIgnoredChannel[]
   bypassRoles            AntiSpamBypassRole[]
 }
 
 model AntiSpamIgnoredChannel {
-  id               Int             @id @default(autoincrement())
+  id               Int            @id @default(autoincrement())
   antiSpamConfigId Int
   channelId        String
-  config           AntiSpamConfig  @relation(fields: [antiSpamConfigId], references: [id], onDelete: Cascade)
+  config           AntiSpamConfig @relation(fields: [antiSpamConfigId], references: [id], onDelete: Cascade)
 
   @@unique([antiSpamConfigId, channelId])
 }
 
 model AntiSpamBypassRole {
-  id               Int             @id @default(autoincrement())
+  id               Int            @id @default(autoincrement())
   antiSpamConfigId Int
   roleId           String
-  config           AntiSpamConfig  @relation(fields: [antiSpamConfigId], references: [id], onDelete: Cascade)
+  config           AntiSpamConfig @relation(fields: [antiSpamConfigId], references: [id], onDelete: Cascade)
 
   @@unique([antiSpamConfigId, roleId])
 }
 
 model ModerationConfig {
-  id                   Int                     @id @default(autoincrement())
-  globalConfigId       Int                     @unique
-  banEnabled           Boolean                 @default(false)
-  banLogChannelId      String?
-  banDmEnabled         Boolean                 @default(false)
-  banDmMessage         String?
-  banDmContactId       String?
-  castigoEnabled       Boolean                 @default(false)
-  castigoLogChannelId  String?
-  castigoDmEnabled     Boolean                 @default(false)
-  castigoDmMessage     String?
-  castigoDmContactId   String?
-  createdAt            DateTime                @default(now())
-  updatedAt            DateTime                @updatedAt
-  config               GlobalConfig            @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
-  permissions          ModerationPermission[]
+  id                  Int                    @id @default(autoincrement())
+  globalConfigId      Int                    @unique
+  banEnabled          Boolean                @default(false)
+  banLogChannelId     String?
+  banDmEnabled        Boolean                @default(false)
+  banDmMessage        String?
+  banDmContactId      String?
+  castigoEnabled      Boolean                @default(false)
+  castigoLogChannelId String?
+  castigoDmEnabled    Boolean                @default(false)
+  castigoDmMessage    String?
+  castigoDmContactId  String?
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+  config              GlobalConfig           @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
+  permissions         ModerationPermission[]
 }
 
 model ModerationPermission {
-  id                  Int               @id @default(autoincrement())
-  moderationConfigId  Int
-  commandType         String
-  roleId              String
-  config              ModerationConfig  @relation(fields: [moderationConfigId], references: [id], onDelete: Cascade)
+  id                 Int              @id @default(autoincrement())
+  moderationConfigId Int
+  commandType        String
+  roleId             String
+  config             ModerationConfig @relation(fields: [moderationConfigId], references: [id], onDelete: Cascade)
 
   @@unique([moderationConfigId, commandType, roleId])
 }
@@ -428,7 +446,7 @@ model Blacklist {
 }
 
 model CastigoRecord {
-  id               Int       @id @default(autoincrement())
+  id               Int          @id @default(autoincrement())
   globalConfigId   Int
   guildId          String
   userId           String
@@ -440,8 +458,8 @@ model CastigoRecord {
   endedAt          DateTime?
   endedReason      String?
   endedBy          String?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
   config           GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
 
   @@index([guildId, userId])
@@ -449,49 +467,49 @@ model CastigoRecord {
 }
 
 model InviteStat {
-  id              Int      @id @default(autoincrement())
-  globalConfigId  Int
-  guildId         String
-  inviterId       String
-  inviterTag      String?
-  inviteCode      String?
-  uses            Int      @default(0)
+  id               Int          @id @default(autoincrement())
+  globalConfigId   Int
+  guildId          String
+  inviterId        String
+  inviterTag       String?
+  inviteCode       String?
+  uses             Int          @default(0)
   lastJoinedUserId String?
-  lastJoinAt      DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  config          GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
+  lastJoinAt       DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  config           GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
 
   @@unique([globalConfigId, guildId, inviterId])
   @@index([guildId, uses])
 }
 
 model InviteEvent {
-  id             Int      @id @default(autoincrement())
+  id             Int          @id @default(autoincrement())
   globalConfigId Int
   guildId        String
   userId         String
   inviterId      String?
   inviterTag     String?
   inviteCode     String?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime     @default(now())
   config         GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
 
   @@index([guildId, inviterId])
 }
 
 model ChannelCleanerPanel {
-  id              Int      @id @default(autoincrement())
+  id              Int          @id @default(autoincrement())
   globalConfigId  Int
   name            String
   guildId         String
   channelId       String
   intervalSeconds Int
   filterMessageId String?
-  isActive        Boolean  @default(true)
+  isActive        Boolean      @default(true)
   lastRunAt       DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
   config          GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
 
   @@index([channelId])
@@ -520,18 +538,18 @@ model CommandPermissionGlobal {
 }
 
 model SupportTicket {
-  id               Int      @id @default(autoincrement())
-  threadId         String   @unique
-  channelId        String
-  guildId          String
-  openerId         String
-  openerTag        String?
-  closedBy         String?
-  closedAt         DateTime?
-  transcriptUrl    String?
-  logMessageId     String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id            Int       @id @default(autoincrement())
+  threadId      String    @unique
+  channelId     String
+  guildId       String
+  openerId      String
+  openerTag     String?
+  closedBy      String?
+  closedAt      DateTime?
+  transcriptUrl String?
+  logMessageId  String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 }
 
 model VerifiedUserGlobal {
@@ -546,25 +564,25 @@ model VerifiedUserGlobal {
 }
 
 model SnapshotConfig {
-  id           Int     @id @default(autoincrement())
-  guildId      String  @unique
-  enabled      Boolean @default(false)
-  waitForEmpty Boolean @default(true)
+  id           Int              @id @default(autoincrement())
+  guildId      String           @unique
+  enabled      Boolean          @default(false)
+  waitForEmpty Boolean          @default(true)
   targets      SnapshotTarget[]
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
 
   @@index([enabled])
 }
 
 model SnapshotTarget {
-  id          Int     @id @default(autoincrement())
+  id          Int            @id @default(autoincrement())
   configId    Int
   channelId   String
   channelType String
   snapshot    String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
   config      SnapshotConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
 
   @@unique([configId, channelId])
@@ -572,16 +590,16 @@ model SnapshotTarget {
 }
 
 model UserStatGlobal {
-  id                    Int      @id @default(autoincrement())
+  id                    Int       @id @default(autoincrement())
   guildId               String
   userId                String
-  messageCount          Int      @default(0)
-  voiceSeconds          Int      @default(0)
+  messageCount          Int       @default(0)
+  voiceSeconds          Int       @default(0)
   voiceSessionStartedAt DateTime?
   voiceSessionChannelId String?
   lastMessageAt         DateTime?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   @@unique([guildId, userId])
 }
@@ -592,59 +610,59 @@ model InstaPostGlobal {
   channelId    String
   authorId     String
   mediaUrl     String
-  mediaType    String   // image|video|gif|other
+  mediaType    String // image|video|gif|other
   createdAt    DateTime @default(now())
   likeCount    Int      @default(0)
   commentCount Int      @default(0)
 
-  likes     InstaLikeGlobal[]
-  comments  InstaCommentGlobal[]
+  likes    InstaLikeGlobal[]
+  comments InstaCommentGlobal[]
 }
 
 model InstaLikeGlobal {
-  id        Int     @id @default(autoincrement())
+  id        Int             @id @default(autoincrement())
   postId    String
   userId    String
-  createdAt DateTime @default(now())
+  createdAt DateTime        @default(now())
   post      InstaPostGlobal @relation(fields: [postId], references: [id], onDelete: Cascade)
 
   @@unique([postId, userId])
 }
 
 model InstaCommentGlobal {
-  id        Int     @id @default(autoincrement())
+  id        Int             @id @default(autoincrement())
   postId    String
   userId    String
   content   String
-  createdAt DateTime @default(now())
+  createdAt DateTime        @default(now())
   post      InstaPostGlobal @relation(fields: [postId], references: [id], onDelete: Cascade)
 }
 
 model InstaWinnerGlobal {
-  id               Int     @id @default(autoincrement())
-  channelId        String
-  postId           String
-  winnerUserId     String
-  likeCount        Int
-  winnerMessageId  String
-  createdAt        DateTime @default(now())
+  id              Int      @id @default(autoincrement())
+  channelId       String
+  postId          String
+  winnerUserId    String
+  likeCount       Int
+  winnerMessageId String
+  createdAt       DateTime @default(now())
 }
 
 model Guild {
-  id            String  @id @map("guild_id")
-  name          String?
-  posseUserId   String? // superusuário da guild que pode tudo
-  createdAt     DateTime @default(now())
+  id             String          @id @map("guild_id")
+  name           String?
+  posseUserId    String? // superusuário da guild que pode tudo
+  createdAt      DateTime        @default(now())
   commandConfigs CommandConfig[]
-  auditLogs     AuditLog[]
-  config        GuildConfig?
-  verifiedUsers VerifiedUser[]
-  instaPosts    InstaPost[]
-  instaWinners  InstaWinner[]
+  auditLogs      AuditLog[]
+  config         GuildConfig?
+  verifiedUsers  VerifiedUser[]
+  instaPosts     InstaPost[]
+  instaWinners   InstaWinner[]
 }
 
 model VoiceMute {
-  id               Int      @id @default(autoincrement())
+  id               Int          @id @default(autoincrement())
   globalConfigId   Int
   guildId          String
   userId           String
@@ -654,15 +672,15 @@ model VoiceMute {
   expiresAt        DateTime?
   commandChannelId String?
   endedAt          DateTime?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
   config           GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
 
   @@index([guildId, userId])
 }
 
 model ChatMute {
-  id               Int      @id @default(autoincrement())
+  id               Int          @id @default(autoincrement())
   globalConfigId   Int
   guildId          String
   userId           String
@@ -672,22 +690,22 @@ model ChatMute {
   expiresAt        DateTime?
   commandChannelId String?
   endedAt          DateTime?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
   config           GlobalConfig @relation(fields: [globalConfigId], references: [id], onDelete: Cascade)
 
   @@index([guildId, userId])
 }
 
 model CommandConfig {
-  id        Int     @id @default(autoincrement())
-  guildId   String
-  name      String
-  enabled   Boolean @default(true)
+  id           Int           @id @default(autoincrement())
+  guildId      String
+  name         String
+  enabled      Boolean       @default(true)
   allowedUsers AllowedUser[]
   allowedRoles AllowedRole[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 
   guild Guild @relation(fields: [guildId], references: [id], onDelete: Cascade)
 
@@ -695,7 +713,7 @@ model CommandConfig {
 }
 
 model AllowedUser {
-  id        Int    @id @default(autoincrement())
+  id        Int           @id @default(autoincrement())
   commandId Int
   userId    String
   command   CommandConfig @relation(fields: [commandId], references: [id], onDelete: Cascade)
@@ -704,7 +722,7 @@ model AllowedUser {
 }
 
 model AllowedRole {
-  id        Int    @id @default(autoincrement())
+  id        Int           @id @default(autoincrement())
   commandId Int
   roleId    String
   command   CommandConfig @relation(fields: [commandId], references: [id], onDelete: Cascade)
@@ -718,31 +736,31 @@ model AuditLog {
   actorId   String
   action    String
   details   String?
-  createdAt DateTime  @default(now())
+  createdAt DateTime @default(now())
 
   guild Guild @relation(fields: [guildId], references: [id], onDelete: Cascade)
 }
 
 model GuildConfig {
-  id                 Int     @id @default(autoincrement())
-  guildId            String  @unique
+  id                   Int              @id @default(autoincrement())
+  guildId              String           @unique
   // Verificação
   verifyPanelChannelId String?
-  mainRoleId         String? // InstaMod que pode verificar/encerrar
-  verifiedRoleId     String? // Cargo "Verificado"
+  mainRoleId           String? // InstaMod que pode verificar/encerrar
+  verifiedRoleId       String? // Cargo "Verificado"
   // Cargos para mencionar ao abrir ticket
-  ticketPingRoles    TicketPingRole[]
+  ticketPingRoles      TicketPingRole[]
   // Insta channels
-  instaBoysChannelId  String?
-  instaGirlsChannelId String?
+  instaBoysChannelId   String?
+  instaGirlsChannelId  String?
 
   guild Guild @relation(fields: [guildId], references: [id], onDelete: Cascade)
 }
 
 model TicketPingRole {
-  id        Int    @id @default(autoincrement())
+  id            Int    @id @default(autoincrement())
   guildConfigId Int
-  roleId    String
+  roleId        String
 
   config GuildConfig @relation(fields: [guildConfigId], references: [id], onDelete: Cascade)
 
@@ -753,7 +771,7 @@ model VerifiedUser {
   id         Int      @id @default(autoincrement())
   guildId    String
   userId     String
-  verifiedAt DateTime  @default(now())
+  verifiedAt DateTime @default(now())
   verifiedBy String?
 
   guild Guild @relation(fields: [guildId], references: [id], onDelete: Cascade)
@@ -768,19 +786,19 @@ model InstaPost {
   channelId    String
   authorId     String
   mediaUrl     String
-  mediaType    String   // image|video|gif|other
+  mediaType    String // image|video|gif|other
   createdAt    DateTime @default(now())
   likeCount    Int      @default(0)
   commentCount Int      @default(0)
 
-  likes     InstaLike[]
-  comments  InstaComment[]
+  likes    InstaLike[]
+  comments InstaComment[]
 
   guild Guild @relation(fields: [guildId], references: [id], onDelete: Cascade)
 }
 
 model InstaLike {
-  id        Int     @id @default(autoincrement())
+  id        Int      @id @default(autoincrement())
   postId    String
   userId    String
   createdAt DateTime @default(now())
@@ -791,7 +809,7 @@ model InstaLike {
 }
 
 model InstaComment {
-  id        Int     @id @default(autoincrement())
+  id        Int      @id @default(autoincrement())
   postId    String
   userId    String
   content   String
@@ -801,15 +819,14 @@ model InstaComment {
 }
 
 model InstaWinner {
-  id            Int     @id @default(autoincrement())
-  guildId       String
-  channelId     String
-  postId        String
-  winnerUserId  String
-  likeCount     Int
+  id              Int      @id @default(autoincrement())
+  guildId         String
+  channelId       String
+  postId          String
+  winnerUserId    String
+  likeCount       Int
   winnerMessageId String // mensagem enviada avisando vencedor (para preservar)
-  createdAt     DateTime @default(now())
+  createdAt       DateTime @default(now())
 
   guild Guild @relation(fields: [guildId], references: [id], onDelete: Cascade)
 }
-
