@@ -173,6 +173,9 @@ function buildModuleEmbed(module, cfg) {
 
 function buildModuleComponents(module, cfg) {
   const state = cfg[module.id] || {};
+  const defaultLogChannel = state.logChannelId ? [state.logChannelId] : [];
+  const defaultLimitRole = state.limitRoleId ? [state.limitRoleId] : [];
+  const defaultBlockedRoles = Array.isArray(state.roles) ? state.roles.slice(0, 25) : [];
   const rows = [];
   const buttons = [];
   buttons.push(new ButtonBuilder().setCustomId(CUSTOM_IDS.TOGGLE(module.id)).setLabel(state.enabled ? 'Desativar' : 'Ativar').setStyle(state.enabled ? ButtonStyle.Danger : ButtonStyle.Success));
@@ -202,6 +205,7 @@ function buildModuleComponents(module, cfg) {
       new RoleSelectMenuBuilder()
         .setCustomId(CUSTOM_IDS.ROLE_LIMIT(module.id))
         .setPlaceholder('Selecionar cargo limite')
+        .setDefaultRoles(defaultLimitRole)
         .setMinValues(1)
         .setMaxValues(1),
     ));
@@ -212,6 +216,7 @@ function buildModuleComponents(module, cfg) {
       new ChannelSelectMenuBuilder()
         .setCustomId(CUSTOM_IDS.LOG(module.id))
         .setPlaceholder('Selecionar canal de log')
+        .setDefaultChannels(defaultLogChannel)
         .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
         .setMinValues(1)
         .setMaxValues(1),
@@ -245,6 +250,7 @@ function buildModuleComponents(module, cfg) {
       new RoleSelectMenuBuilder()
         .setCustomId(CUSTOM_IDS.BLOCKED_ROLES(module.id))
         .setPlaceholder('Selecionar cargos bloqueados')
+        .setDefaultRoles(defaultBlockedRoles)
         .setMinValues(1)
         .setMaxValues(25),
     ));
@@ -257,12 +263,15 @@ function buildModuleComponents(module, cfg) {
 
 function buildWhitelistComponents(module, cfg) {
   const state = cfg[module.id] || {};
+  const defaultWhitelistUsers = Array.isArray(state.whitelistUsers) ? state.whitelistUsers.slice(0, 25) : [];
+  const defaultWhitelistRoles = Array.isArray(state.whitelistRoles) ? state.whitelistRoles.slice(0, 25) : [];
   const rows = [];
 
   rows.push(new ActionRowBuilder().addComponents(
     new UserSelectMenuBuilder()
       .setCustomId(CUSTOM_IDS.WH_USERS(module.id))
       .setPlaceholder('Selecionar usuários em whitelist')
+      .setDefaultUsers(defaultWhitelistUsers)
       .setMinValues(0)
       .setMaxValues(25),
   ));
@@ -271,6 +280,7 @@ function buildWhitelistComponents(module, cfg) {
     new RoleSelectMenuBuilder()
       .setCustomId(CUSTOM_IDS.WH_ROLES(module.id))
       .setPlaceholder('Selecionar cargos em whitelist')
+      .setDefaultRoles(defaultWhitelistRoles)
       .setMinValues(0)
       .setMaxValues(25),
   ));

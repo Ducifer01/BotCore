@@ -82,7 +82,7 @@ function buildBaseEmbed(title, executor, target, description) {
     description,
     color: 0xE74C3C,
     fields: [
-      executor ? { name: 'Executor', value: `${executor.tag || executor.username} (${executor.id})` } : undefined,
+      executor ? { name: 'Usuário', value: `${executor.tag || executor.username} (${executor.id})` } : undefined,
       target ? { name: 'Alvo', value: `${target.name || target.tag || target.id} (${target.id})` } : undefined,
     ].filter(Boolean),
     timestamp: new Date().toISOString(),
@@ -315,7 +315,7 @@ function createRuntime() {
       }
       if (executorMember) await punishMember(executorMember, cfg.antiBotAdd.punishment, 'Proteção: bot não autorizado');
     }
-    const embed = buildBaseEmbed('Proteção: Bot Add', executor, member.user, whitelisted ? 'Bot permitido (whitelist)' : 'Bot removido e executor punido');
+    const embed = buildBaseEmbed('Proteção: Bot Add', executor, member.user, whitelisted ? 'Bot permitido (whitelist)' : 'Bot removido e usuário punido');
     await logAction(guild, cfg.antiBotAdd.logChannelId, embed);
   }
 
