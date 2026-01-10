@@ -4,42 +4,78 @@ const {
   ButtonBuilder,
   ButtonStyle,
   StringSelectMenuBuilder,
+  ChannelSelectMenuBuilder,
+  RoleSelectMenuBuilder,
+  UserSelectMenuBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  ChannelType,
 } = require('discord.js');
 const { ensureGuild } = require('../permissions');
+const { getProtectionsConfig, saveProtectionsConfig, PUNISH, DEFAULT_CRITICAL_PERMS } = require('../services/protectionsConfig');
 
 const CUSTOM_IDS = {
   ROOT: 'menu:protections:root',
-  // Reservado para módulos futuros.
-  SNAPSHOTS: 'menu:protections:snapshots',
+  MODULE_SELECT: 'menu:protections:select',
+  TOGGLE: (m) => `prot:toggle:${m}`,
+  PUNISH: (m) => `prot:punish:${m}`,
+  LIMIT: (m) => `prot:limit:${m}`,
+  WHITELIST: (m) => `prot:wh:${m}`,
+  LOG: (m) => `prot:log:${m}`,
+  ROLE_LIMIT: (m) => `prot:rolelimit:${m}`,
+  BLOCKED_ROLES: (m) => `prot:blockroles:${m}`,
+  BLOCKED_PERMS: (m) => `prot:blockperms:${m}`,
+  MIN_DAYS: (m) => `prot:mindays:${m}`,
+  PROTECT_PERMS: (m) => `prot:protectperms:${m}`,
+  PROTECT_ASSIGN: (m) => `prot:protectassign:${m}`,
+  WH_USERS: (m) => `prot:whusers:${m}`,
+  WH_ROLES: (m) => `prot:whroles:${m}`,
+  BACK_MODULE: (m) => `prot:back:${m}`,
 };
 
-function isMessageComponent(interaction) {
-  return (
-    interaction?.isButton?.() ||
-    interaction?.isStringSelectMenu?.() ||
-    interaction?.isChannelSelectMenu?.() ||
-    interaction?.isAnySelectMenu?.()
-  );
+const MODALS = {
+  LIMIT: (m, msg) => `protmodal:limit:${m}:${msg || '0'}`,
+  WHITELIST: (m, msg) => `protmodal:wh:${m}:${msg || '0'}`,
+  BLOCKED_PERMS: (m, msg) => `protmodal:blockperms:${m}:${msg || '0'}`,
+  MIN_DAYS: (m, msg) => `protmodal:mindays:${m}:${msg || '0'}`,
+};
+
+const MODULES = [
+  { id: 'antiRoleHierarchy', label: 'Anti Hierarquia de Cargos', hasLimit: false, hasLog: true, hasWhitelist: true, hasPunish: true, extras: ['roleLimit', 'protectPerms'] },
+  { id: 'antiBotAdd', label: 'Anti Bot Add', hasLog: true, hasWhitelist: true, hasPunish: true },
+  { id: 'antiWebhook', label: 'Anti Webhook', hasLog: true, hasWhitelist: true, hasPunish: true, hasLimit: true },
+  { id: 'antiCriticalPerms', label: 'Anti Permissão Crítica', hasLog: true, hasWhitelist: true, hasPunish: true, extras: ['blockedPerms'] },
+  { id: 'antiAlt', label: 'Anti ALT', hasLog: true, hasWhitelist: false, hasPunish: true, extras: ['minDays'] },
+  { id: 'massBanKick', label: 'Proteção Ban/Kick massivo', hasLog: true, hasWhitelist: true, hasPunish: true, hasLimit: true },
+  { id: 'massTimeout', label: 'Proteção Timeout massivo', hasLog: true, hasWhitelist: true, hasPunish: true, hasLimit: true },
+  { id: 'massChannelDelete', label: 'Proteção deleção de canais', hasLog: true, hasWhitelist: true, hasPunish: true, hasLimit: true },
+  { id: 'massRoleDelete', label: 'Proteção deleção de cargos', hasLog: true, hasWhitelist: true, hasPunish: true, hasLimit: true },
+  { id: 'blockedRoles', label: 'Cargos bloqueados', hasLog: true, hasWhitelist: false, hasPunish: false, extras: ['blockedRoles'] },
+  { id: 'massDisconnect', label: 'Proteção desconectar massivo', hasLog: true, hasWhitelist: true, hasPunish: true, hasLimit: true },
+  { id: 'massMuteDeafen', label: 'Proteção mute/deafen massivo', hasLog: true, hasWhitelist: true, hasPunish: true, hasLimit: true },
+];
+
+function isComponent(i) {
+  return i.isButton?.() || i.isAnySelectMenu?.();
 }
 
 async function ensureDeferred(interaction) {
   if (!interaction?.isRepliable?.()) return;
-  if (isMessageComponent(interaction)) {
+  if (isComponent(interaction)) {
     if (!interaction.deferred && !interaction.replied) {
-      await interaction.deferUpdate();
+      await interaction.deferUpdate().catch(() => {});
     }
-    return;
-  }
-  if (!interaction.deferred && !interaction.replied) {
-    await interaction.deferReply({ ephemeral: true });
+  } else if (!interaction.deferred && !interaction.replied) {
+    await interaction.deferReply({ ephemeral: true }).catch(() => {});
   }
 }
 
-async function respondPanel(interaction, payload) {
+async function respond(interaction, payload) {
   if (!interaction?.isRepliable?.()) return;
-  if (isMessageComponent(interaction)) {
+  if (interaction.isMessageComponent?.()) {
     if (!interaction.deferred && !interaction.replied) {
-      await interaction.deferUpdate();
+      await interaction.deferUpdate().catch(() => {});
     }
     await interaction.editReply(payload).catch(() => {});
     return;
@@ -51,129 +87,485 @@ async function respondPanel(interaction, payload) {
   }
 }
 
-function parseSnapshotSafe(snapshot) {
-  if (!snapshot) return null;
-  if (typeof snapshot === 'string') {
-    try {
-      return JSON.parse(snapshot);
-    } catch (err) {
-      console.warn('[snapshot] Falha ao parsear snapshot salvo:', err?.message || err);
-      return null;
-    }
-  }
-  return snapshot;
+function buildPayload(embed, components) {
+  return { embeds: [embed], components };
 }
 
-function normalizeOverwriteType(type) {
-  if (type === 1 || type === '1' || type === 'member') return 'member';
-  if (type === 0 || type === '0' || type === 'role') return 'role';
-  return String(type || 'role');
+function punishmentLabel(p) {
+  if (p === PUNISH.KICK) return 'Expulsar usuário';
+  return 'Remover todos os cargos';
 }
 
-function sortOverwrites(overwrites = []) {
-  return [...overwrites].sort((a, b) => {
-    if (a.id === b.id) return normalizeOverwriteType(a.type).localeCompare(normalizeOverwriteType(b.type));
-    return String(a.id).localeCompare(String(b.id));
-  });
+function formatIds(arr = []) {
+  return arr.length ? arr.map((id) => `\`${id}\``).join(', ') : '—';
 }
 
-function normalizeSnapshot(snapshot) {
-  if (!snapshot) return null;
-  return {
-    ...snapshot,
-    permissionOverwrites: sortOverwrites(
-      (snapshot.permissionOverwrites || []).map((ow) => ({
-        id: ow.id,
-        type: normalizeOverwriteType(ow.type),
-        allow: String(ow.allow || '0'),
-        deny: String(ow.deny || '0'),
-      })),
-    ),
-  };
+function moduleById(id) {
+  return MODULES.find((m) => m.id === id);
 }
 
-function snapshotChannel(channel) {
-  if (!channel) return null;
-  const base = normalizeSnapshot({
-    id: channel.id,
-    name: channel.name,
-    type: channel.type,
-    parentId: channel.parentId || null,
-    permissionOverwrites: channel.permissionOverwrites.cache.map((ow) => ({
-      id: ow.id,
-      type: normalizeOverwriteType(ow.type),
-      allow: ow.allow.bitfield.toString(),
-      deny: ow.deny.bitfield.toString(),
-    })),
-  });
-
-  if (channel.type === ChannelType.GuildVoice || channel.type === ChannelType.GuildStageVoice) {
-    base.bitrate = channel.bitrate;
-    base.userLimit = channel.userLimit;
-    base.rtcRegion = channel.rtcRegion || null;
-  }
-  return base;
-}
-
-function cacheConfig(config) {
-  const normalized = normalizeConfig(config);
-  runtime.configs.set(normalized.guildId, normalized);
-  return normalized;
-}
-
-async function loadAndCacheConfig(guildId, prisma) {
-  const cfg = await loadConfig(guildId, prisma);
-  return cacheConfig(cfg);
-}
-
-function hasManagePermission(channel) {
-  const me = channel.guild?.members?.me;
-  if (!me) return false;
-  const perms = channel.permissionsFor(me);
-  return perms?.has(PermissionsBitField.Flags.ManageChannels, true) || false;
-}
-
-function buildRootEmbed() {
+function buildRootEmbed(cfg) {
   return new EmbedBuilder()
     .setTitle('Proteções e Snapshots')
-    .setDescription('Escolha um sistema de proteção para configurar.')
+    .setDescription('Selecione uma proteção para configurar. Todos os módulos iniciam desativados.')
+    .addFields(
+      MODULES.filter((m) => !m.disabled).map((m) => ({
+        name: m.label,
+        value: cfg?.[m.id]?.enabled ? 'Ativado' : 'Desativado',
+        inline: true,
+      })),
+    )
     .setColor(0x5865f2);
 }
 
-function buildRootComponents() {
+function buildRootComponents(selected) {
   const select = new StringSelectMenuBuilder()
-    .setCustomId(CUSTOM_IDS.ROOT)
+    .setCustomId(CUSTOM_IDS.MODULE_SELECT)
     .setPlaceholder('Selecione uma proteção')
-    .addOptions([
-      { label: 'Em breve', value: 'coming_soon', description: 'Módulos de proteção serão adicionados depois' },
-    ]);
-  const row1 = new ActionRowBuilder().addComponents(select);
-  const back = new ButtonBuilder().setCustomId('menu:back').setLabel('Voltar').setStyle(ButtonStyle.Secondary);
-  const row2 = new ActionRowBuilder().addComponents(back);
-  return [row1, row2];
+    .addOptions(
+      MODULES.map((m) => ({
+        label: m.label,
+        value: m.id,
+        description: m.disabled ? 'Em breve' : 'Configurar módulo',
+        default: selected === m.id,
+        emoji: m.disabled ? '⏳' : undefined,
+      })),
+    );
+  const row = new ActionRowBuilder().addComponents(select);
+  const back = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('menu:back').setLabel('Voltar').setStyle(ButtonStyle.Secondary));
+  return [row, back];
+}
+
+function buildModuleEmbed(module, cfg) {
+  const state = cfg[module.id] || {};
+  const fields = [
+    { name: 'Status', value: state.enabled ? 'Ativado' : 'Desativado', inline: true },
+  ];
+  if (module.hasPunish) fields.push({ name: 'Punição', value: punishmentLabel(state.punishment), inline: true });
+  if (module.hasLog) fields.push({ name: 'Log', value: state.logChannelId ? `<#${state.logChannelId}>` : '—', inline: true });
+  if (module.hasWhitelist) fields.push({ name: 'Whitelist Users/Roles', value: `${state.whitelistUsers?.length || 0} / ${state.whitelistRoles?.length || 0}`, inline: true });
+  if (module.hasLimit) fields.push({ name: 'Limite', value: state.limit ? `${state.limit.count}/${state.limit.seconds}s` : '—', inline: true });
+
+  if (module.id === 'antiRoleHierarchy') {
+    fields.push({ name: 'Cargo limite', value: state.limitRoleId ? `<@&${state.limitRoleId}>` : '—', inline: true });
+    fields.push({ name: 'Proteger permissões', value: state.protectPermissions ? 'Sim' : 'Não', inline: true });
+    fields.push({ name: 'Anti-set cargos', value: state.preventProtectedRoleGive ? 'Sim' : 'Não', inline: true });
+  }
+  if (module.id === 'antiWebhook') {
+    fields.push({ name: 'Rate', value: `${state.rate?.count}/${state.rate?.seconds || 60}s (bypass: ${state.whitelistBypassRate ? 'sim' : 'não'})`, inline: true });
+  }
+  if (module.id === 'antiCriticalPerms') {
+    fields.push({ name: 'Perms bloqueadas', value: state.blockedPerms?.length ? state.blockedPerms.join(', ') : '—', inline: false });
+  }
+  if (module.id === 'antiAlt') {
+    fields.push({ name: 'Idade mínima (dias)', value: String(state.minAccountDays || 7), inline: true });
+  }
+  if (module.id === 'blockedRoles') {
+    fields.push({ name: 'Cargos bloqueados', value: state.roles?.length ? state.roles.map((r) => `<@&${r}>`).join(', ') : '—', inline: false });
+  }
+
+  return new EmbedBuilder()
+    .setTitle(module.label)
+    .setDescription('Ajuste as opções abaixo.')
+    .addFields(fields)
+    .setColor(state.enabled ? 0x2ecc71 : 0x5865f2);
+}
+
+function buildModuleComponents(module, cfg) {
+  const state = cfg[module.id] || {};
+  const rows = [];
+  const buttons = [];
+  buttons.push(new ButtonBuilder().setCustomId(CUSTOM_IDS.TOGGLE(module.id)).setLabel(state.enabled ? 'Desativar' : 'Ativar').setStyle(state.enabled ? ButtonStyle.Danger : ButtonStyle.Success));
+  if (module.hasPunish) {
+    buttons.push(new ButtonBuilder().setCustomId(CUSTOM_IDS.PUNISH(module.id)).setLabel(`Punição: ${punishmentLabel(state.punishment)}`).setStyle(ButtonStyle.Secondary));
+  }
+  if (module.id === 'antiRoleHierarchy') {
+    buttons.push(new ButtonBuilder()
+      .setCustomId(CUSTOM_IDS.PROTECT_PERMS(module.id))
+      .setLabel(state.protectPermissions ? 'Proteger permissões: ON' : 'Proteger permissões: OFF')
+      .setStyle(ButtonStyle.Secondary));
+    buttons.push(new ButtonBuilder()
+      .setCustomId(CUSTOM_IDS.PROTECT_ASSIGN(module.id))
+      .setLabel(state.preventProtectedRoleGive ? 'Anti-set cargos: ON' : 'Anti-set cargos: OFF')
+      .setStyle(ButtonStyle.Secondary));
+  }
+  rows.push(new ActionRowBuilder().addComponents(buttons));
+
+  if (module.hasLimit) {
+    rows.push(new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(CUSTOM_IDS.LIMIT(module.id)).setLabel('Editar limite (X/Y)').setStyle(ButtonStyle.Primary),
+    ));
+  }
+
+  if (module.id === 'antiRoleHierarchy') {
+    rows.push(new ActionRowBuilder().addComponents(
+      new RoleSelectMenuBuilder()
+        .setCustomId(CUSTOM_IDS.ROLE_LIMIT(module.id))
+        .setPlaceholder('Selecionar cargo limite')
+        .setMinValues(1)
+        .setMaxValues(1),
+    ));
+  }
+
+  if (module.hasLog) {
+    rows.push(new ActionRowBuilder().addComponents(
+      new ChannelSelectMenuBuilder()
+        .setCustomId(CUSTOM_IDS.LOG(module.id))
+        .setPlaceholder('Selecionar canal de log')
+        .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+        .setMinValues(1)
+        .setMaxValues(1),
+    ));
+  }
+
+  if (module.hasWhitelist) {
+    const wlRowButtons = [new ButtonBuilder().setCustomId(CUSTOM_IDS.WHITELIST(module.id)).setLabel('Editar whitelist').setStyle(ButtonStyle.Secondary)];
+    if (module.id === 'antiCriticalPerms') {
+      wlRowButtons.push(new ButtonBuilder().setCustomId(CUSTOM_IDS.BLOCKED_PERMS(module.id)).setLabel('Perms bloqueadas').setStyle(ButtonStyle.Secondary));
+    }
+    if (module.id === 'antiAlt') {
+      wlRowButtons.push(new ButtonBuilder().setCustomId(CUSTOM_IDS.MIN_DAYS(module.id)).setLabel('Idade mínima (dias)').setStyle(ButtonStyle.Secondary));
+    }
+    rows.push(new ActionRowBuilder().addComponents(wlRowButtons));
+  } else {
+    if (module.id === 'antiCriticalPerms') {
+      rows.push(new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(CUSTOM_IDS.BLOCKED_PERMS(module.id)).setLabel('Perms bloqueadas').setStyle(ButtonStyle.Secondary),
+      ));
+    }
+    if (module.id === 'antiAlt') {
+      rows.push(new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(CUSTOM_IDS.MIN_DAYS(module.id)).setLabel('Idade mínima (dias)').setStyle(ButtonStyle.Secondary),
+      ));
+    }
+  }
+
+  if (module.id === 'blockedRoles') {
+    rows.push(new ActionRowBuilder().addComponents(
+      new RoleSelectMenuBuilder()
+        .setCustomId(CUSTOM_IDS.BLOCKED_ROLES(module.id))
+        .setPlaceholder('Selecionar cargos bloqueados')
+        .setMinValues(1)
+        .setMaxValues(25),
+    ));
+  }
+
+  const back = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(CUSTOM_IDS.ROOT).setLabel('Voltar').setStyle(ButtonStyle.Secondary));
+  rows.push(back);
+  return rows;
+}
+
+function buildWhitelistComponents(module, cfg) {
+  const state = cfg[module.id] || {};
+  const rows = [];
+
+  rows.push(new ActionRowBuilder().addComponents(
+    new UserSelectMenuBuilder()
+      .setCustomId(CUSTOM_IDS.WH_USERS(module.id))
+      .setPlaceholder('Selecionar usuários em whitelist')
+      .setMinValues(0)
+      .setMaxValues(25),
+  ));
+
+  rows.push(new ActionRowBuilder().addComponents(
+    new RoleSelectMenuBuilder()
+      .setCustomId(CUSTOM_IDS.WH_ROLES(module.id))
+      .setPlaceholder('Selecionar cargos em whitelist')
+      .setMinValues(0)
+      .setMaxValues(25),
+  ));
+
+  rows.push(new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(CUSTOM_IDS.BACK_MODULE(module.id)).setLabel('Voltar ao módulo').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(CUSTOM_IDS.ROOT).setLabel('Voltar menu').setStyle(ButtonStyle.Secondary),
+  ));
+  return rows;
+}
+
+async function presentRoot(interaction, prisma) {
+  await ensureDeferred(interaction);
+  const cfg = await getProtectionsConfig(prisma);
+  const embed = buildRootEmbed(cfg);
+  const components = buildRootComponents();
+  await respond(interaction, { embeds: [embed], components });
+  return true;
+}
+
+async function presentModule(interaction, prisma, moduleId) {
+  await ensureDeferred(interaction);
+  const module = moduleById(moduleId);
+  if (!module || module.disabled) return presentRoot(interaction, prisma);
+  const cfg = await getProtectionsConfig(prisma);
+  const payload = buildPayload(buildModuleEmbed(module, cfg), buildModuleComponents(module, cfg));
+  if (interaction?.isRepliable?.()) {
+    await respond(interaction, payload);
+  } else if (interaction?.edit) {
+    await interaction.edit(payload).catch(() => {});
+  }
+  return true;
+}
+
+async function presentWhitelist(interaction, prisma, moduleId) {
+  await ensureDeferred(interaction);
+  const module = moduleById(moduleId);
+  if (!module || !module.hasWhitelist) return presentModule(interaction, prisma, moduleId);
+  const cfg = await getProtectionsConfig(prisma);
+  const state = cfg[module.id] || {};
+  const desc = [
+    'Edite a whitelist deste módulo.',
+    '',
+    `Usuários atuais: ${state.whitelistUsers?.length ? state.whitelistUsers.map((id) => `<@${id}>`).join(', ') : '—'}`,
+    `Cargos atuais: ${state.whitelistRoles?.length ? state.whitelistRoles.map((id) => `<@&${id}>`).join(', ') : '—'}`,
+  ].join('\n');
+  const embed = buildModuleEmbed(module, cfg).setDescription(desc);
+  const components = buildWhitelistComponents(module, cfg);
+  await respond(interaction, { embeds: [embed], components });
+  return true;
+}
+
+function cyclePunishment(current) {
+  if (current === PUNISH.STRIP_ROLES) return PUNISH.KICK;
+  return PUNISH.STRIP_ROLES;
+}
+
+async function updateConfig(prisma, updater) {
+  const cfg = await getProtectionsConfig(prisma);
+  const next = updater(cfg) || cfg;
+  await saveProtectionsConfig(prisma, next);
+  return next;
+}
+
+async function handleButton(interaction, prisma) {
+  const [prefix, action, moduleId] = (interaction.customId || '').split(':');
+  if (prefix !== 'prot') return false;
+  const module = moduleById(moduleId);
+  if (!module) return false;
+  if (module.disabled) return presentRoot(interaction, prisma);
+
+  const modalActions = ['limit', 'wh', 'blockperms', 'mindays'];
+  if (!modalActions.includes(action)) {
+    await ensureDeferred(interaction);
+  }
+
+  if (action === 'toggle') {
+    await updateConfig(prisma, (cfg) => {
+      cfg[moduleId].enabled = !cfg[moduleId].enabled;
+      return cfg;
+    });
+  }
+  if (action === 'punish') {
+    await updateConfig(prisma, (cfg) => {
+      cfg[moduleId].punishment = cyclePunishment(cfg[moduleId].punishment);
+      return cfg;
+    });
+  }
+  if (action === 'limit') {
+    const messageId = interaction.message?.id || '0';
+    const modal = new ModalBuilder()
+      .setCustomId(MODALS.LIMIT(moduleId, messageId))
+      .setTitle('Limite X em Y segundos')
+      .addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('count').setLabel('Qtd (X)').setStyle(TextInputStyle.Short).setRequired(true)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('seconds').setLabel('Janela em segundos (Y)').setStyle(TextInputStyle.Short).setRequired(true)),
+      );
+    await interaction.showModal(modal);
+    return true;
+  }
+  if (action === 'wh') {
+    return presentWhitelist(interaction, prisma, moduleId);
+  }
+  if (action === 'blockperms') {
+    const messageId = interaction.message?.id || '0';
+    const modal = new ModalBuilder()
+      .setCustomId(MODALS.BLOCKED_PERMS(moduleId, messageId))
+      .setTitle('Permissões bloqueadas')
+      .addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('perms').setLabel('Permissões (nome) separadas por vírgula').setStyle(TextInputStyle.Paragraph).setRequired(false).setValue(DEFAULT_CRITICAL_PERMS.join(', '))),
+      );
+    await interaction.showModal(modal);
+    return true;
+  }
+  if (action === 'mindays') {
+    const messageId = interaction.message?.id || '0';
+    const modal = new ModalBuilder()
+      .setCustomId(MODALS.MIN_DAYS(moduleId, messageId))
+      .setTitle('Idade mínima (dias)')
+      .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('days').setLabel('Dias').setStyle(TextInputStyle.Short).setRequired(true)));
+    await interaction.showModal(modal);
+    return true;
+  }
+  if (action === 'protectperms') {
+    await updateConfig(prisma, (cfg) => {
+      cfg[moduleId].protectPermissions = !cfg[moduleId].protectPermissions;
+      return cfg;
+    });
+  }
+  if (action === 'protectassign') {
+    await updateConfig(prisma, (cfg) => {
+      cfg[moduleId].preventProtectedRoleGive = !cfg[moduleId].preventProtectedRoleGive;
+      return cfg;
+    });
+  }
+
+  return presentModule(interaction, prisma, moduleId);
+}
+
+async function handleSelect(interaction, prisma) {
+  if (interaction.customId === CUSTOM_IDS.MODULE_SELECT) {
+    await ensureDeferred(interaction);
+    const choice = interaction.values?.[0];
+    return presentModule(interaction, prisma, choice);
+  }
+  const [prefix, action, moduleId] = (interaction.customId || '').split(':');
+  if (prefix !== 'prot') return false;
+  await ensureDeferred(interaction);
+  const module = moduleById(moduleId);
+  if (!module) return false;
+  const prismaUpdate = async (dataUpdater) => updateConfig(prisma, dataUpdater);
+
+  if (action === 'log' && interaction.isChannelSelectMenu()) {
+    const channelId = interaction.values?.[0];
+    await prismaUpdate((cfg) => {
+      cfg[moduleId].logChannelId = channelId;
+      return cfg;
+    });
+    return presentModule(interaction, prisma, moduleId);
+  }
+
+  if (action === 'rolelimit' && interaction.isRoleSelectMenu()) {
+    const roleId = interaction.values?.[0];
+    await prismaUpdate((cfg) => {
+      cfg[moduleId].limitRoleId = roleId;
+      return cfg;
+    });
+    return presentModule(interaction, prisma, moduleId);
+  }
+
+  if (action === 'blockroles' && interaction.isRoleSelectMenu()) {
+    const roleIds = interaction.values || [];
+    await prismaUpdate((cfg) => {
+      cfg[moduleId].roles = roleIds;
+      cfg[moduleId].enabled = true;
+      return cfg;
+    });
+    return presentModule(interaction, prisma, moduleId);
+  }
+
+  if (action === 'whusers' && interaction.isUserSelectMenu()) {
+    const userIds = interaction.values || [];
+    await prismaUpdate((cfg) => {
+      cfg[moduleId].whitelistUsers = userIds;
+      return cfg;
+    });
+    return presentWhitelist(interaction, prisma, moduleId);
+  }
+
+  if (action === 'whroles' && interaction.isRoleSelectMenu()) {
+    const roleIds = interaction.values || [];
+    await prismaUpdate((cfg) => {
+      cfg[moduleId].whitelistRoles = roleIds;
+      return cfg;
+    });
+    return presentWhitelist(interaction, prisma, moduleId);
+  }
+
+  return false;
+}
+
+function parseIntSafe(val, fallback) {
+  const num = parseInt(val, 10);
+  return Number.isFinite(num) && num > 0 ? num : fallback;
+}
+
+function splitIds(text) {
+  return (text || '')
+    .split(/[,\s]+/)
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
+
+async function handleModal(interaction, prisma) {
+  const [prefix, action, moduleId, messageId] = (interaction.customId || '').split(':');
+  if (prefix !== 'protmodal') return false;
+  await ensureDeferred(interaction);
+  const module = moduleById(moduleId);
+  if (!module) return false;
+
+  if (action === 'limit') {
+    const count = parseIntSafe(interaction.fields.getTextInputValue('count'), module.hasLimit ? 3 : 1);
+    const seconds = parseIntSafe(interaction.fields.getTextInputValue('seconds'), 30);
+    await updateConfig(prisma, (cfg) => {
+      cfg[moduleId].limit = { count, seconds };
+      return cfg;
+    });
+  }
+  if (action === 'wh') {
+    const users = splitIds(interaction.fields.getTextInputValue('users'));
+    const roles = splitIds(interaction.fields.getTextInputValue('roles'));
+    await updateConfig(prisma, (cfg) => {
+      cfg[moduleId].whitelistUsers = users;
+      cfg[moduleId].whitelistRoles = roles;
+      return cfg;
+    });
+  }
+  if (action === 'blockperms') {
+    const perms = splitIds(interaction.fields.getTextInputValue('perms'));
+    await updateConfig(prisma, (cfg) => {
+      cfg[moduleId].blockedPerms = perms.length ? perms : DEFAULT_CRITICAL_PERMS;
+      return cfg;
+    });
+  }
+  if (action === 'mindays') {
+    const days = parseIntSafe(interaction.fields.getTextInputValue('days'), 7);
+    await updateConfig(prisma, (cfg) => {
+      cfg[moduleId].minAccountDays = days;
+      return cfg;
+    });
+  }
+
+  if (messageId && messageId !== '0') {
+    const msg = await interaction.channel?.messages?.fetch(messageId).catch(() => null);
+    if (msg) {
+      const cfg = await getProtectionsConfig(prisma);
+      const payload = buildPayload(buildModuleEmbed(module, cfg), buildModuleComponents(module, cfg));
+      await msg.edit(payload).catch(() => {});
+      // Apenas uma confirmação silenciosa para evitar criar novos embeds.
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply({ content: 'Configuração atualizada.', components: [], embeds: [] }).catch(() => {});
+      } else {
+        await interaction.reply({ content: 'Configuração atualizada.', ephemeral: true }).catch(() => {});
+      }
+      return true;
+    }
+  }
+  return presentModule(interaction, prisma, moduleId);
 }
 
 async function presentMenu(interaction, ctx) {
   await ensureGuild(interaction.guild);
-  const embed = buildRootEmbed();
-  const components = buildRootComponents();
-  await respondPanel(interaction, { embeds: [embed], components });
-  return true;
+  const prisma = ctx.getPrisma();
+  return presentRoot(interaction, prisma);
 }
-async function handleInteraction(interaction) {
-  const id = interaction.customId;
-  if (interaction.isStringSelectMenu() && id === CUSTOM_IDS.ROOT) {
-    await ensureDeferred(interaction);
-    await respondPanel(interaction, {
-      embeds: [
-        new EmbedBuilder()
-          .setTitle('Proteções e Snapshots')
-          .setDescription('Ainda não há módulos disponíveis. Em breve adicionaremos novas proteções aqui.')
-          .setColor(0x5865f2),
-      ],
-      components: buildRootComponents(),
-    });
-    return true;
+
+async function handleInteraction(interaction, ctx) {
+  const prisma = ctx.getPrisma();
+  if (interaction.isStringSelectMenu()) {
+    if (interaction.customId === CUSTOM_IDS.MODULE_SELECT) return handleSelect(interaction, prisma);
+    if (interaction.customId === CUSTOM_IDS.ROOT) return presentRoot(interaction, prisma);
+  }
+  if (interaction.isButton()) {
+    if (interaction.customId === CUSTOM_IDS.ROOT) return presentRoot(interaction, prisma);
+    if (interaction.customId.startsWith('prot:back:')) {
+      const moduleId = interaction.customId.split(':')[2];
+      return presentModule(interaction, prisma, moduleId);
+    }
+    return handleButton(interaction, prisma);
+  }
+  if (interaction.isModalSubmit()) {
+    return handleModal(interaction, prisma);
+  }
+  if (interaction.isAnySelectMenu()) {
+    return handleSelect(interaction, prisma);
   }
   return false;
 }

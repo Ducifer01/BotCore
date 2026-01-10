@@ -30,6 +30,7 @@ const pointsInteractions = require('./features/pointsInteractions');
 const pointsConfigFeature = require('./features/pointsConfig');
 const blacklistFeature = require('./features/blacklist');
 const protectionsFeature = require('./features/protections');
+const { createRuntime: createProtectionsRuntime } = require('./features/protectionsRuntime');
 const permissionsManager = require('./features/permissionsManager');
 const { ALLOWED_GUILD_IDS, isGuildAllowed } = require('./config');
 const { DISABLED_COMMAND_FILES } = require('./constants/disabledCommands');
@@ -86,6 +87,13 @@ try {
   channelCleanerFeature.registerChannelCleaner(client);
 } catch (e) {
   console.warn('[init] Channel cleaner não carregado:', e?.message || e);
+}
+
+try {
+  const protectionsRuntime = createProtectionsRuntime();
+  protectionsRuntime.register(client);
+} catch (e) {
+  console.warn('[init] Protections runtime não carregado:', e?.message || e);
 }
 
 const menuHandler = createMenuHandler({

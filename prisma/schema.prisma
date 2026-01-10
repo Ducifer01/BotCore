@@ -52,6 +52,7 @@ model GlobalConfig {
   inviteAccountAgeFilterEnabled Boolean                   @default(false)
   inviteAccountAgeMinDays       Int                       @default(7)
   inviteStats                   InviteStat[]
+  protectionsConfigJson        String?                  @default("{}")
   inviteEvents                  InviteEvent[]
   // Limpeza de canais
   channelCleanerPanels          ChannelCleanerPanel[]

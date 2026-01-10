@@ -438,7 +438,6 @@ async function handleInfoCommand(message, args, prisma) {
     prisma.verifiedUserGlobal.findUnique({ where: { userId: member.id } }),
   ]);
   const messageCount = stats?.messageCount || 0;
-  const voiceHours = ((stats?.voiceSeconds || 0) / 3600).toFixed(2);
   const everyoneId = message.guild.roles.everyone.id;
   const roles = member.roles.cache
     .filter((role) => role.id !== everyoneId)
@@ -448,7 +447,6 @@ async function handleInfoCommand(message, args, prisma) {
   const description = [
     `Informações de <@${member.id}>`,
     `${messageCount} mensagens registradas`,
-    `${voiceHours} horas em call`,
     '',
     `Cargos: ${rolesText}`,
   ].join('\n');
@@ -466,7 +464,7 @@ async function handleInfoCommand(message, args, prisma) {
 
   setTimeout(() => {
     sent.delete().catch(() => {});
-  }, 10000);
+  }, 15000);
 }
 
 async function handleRemoveVerifiedCommand(message, args, prisma, posseId) {
