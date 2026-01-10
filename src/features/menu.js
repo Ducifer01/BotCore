@@ -42,9 +42,10 @@ function createMenuHandler({ insta, mute, support, automod, moderation, invites,
   }
 
   async function handleRootSelection(interaction, ctx) {
+    await interaction.deferUpdate().catch(() => {});
     const { POSSE_USER_ID } = ctx;
     if (!POSSE_USER_ID || POSSE_USER_ID !== interaction.user.id) {
-      await interaction.reply({ content: 'Apenas o usuário posse pode usar este comando.', ephemeral: true });
+      await interaction.followUp({ content: 'Apenas o usuário posse pode usar este comando.', ephemeral: true }).catch(() => {});
       return true;
     }
     const choice = interaction.values?.[0];
@@ -85,9 +86,10 @@ function createMenuHandler({ insta, mute, support, automod, moderation, invites,
   }
 
   async function handleBack(interaction) {
+    await interaction.deferUpdate().catch(() => {});
     const embed = buildBaseMenuEmbed();
     const row = new ActionRowBuilder().addComponents(buildRootSelect());
-    await interaction.update({ embeds: [embed], components: [row] });
+    await interaction.editReply({ embeds: [embed], components: [row] }).catch(() => {});
     return true;
   }
 

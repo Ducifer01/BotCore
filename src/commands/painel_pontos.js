@@ -1,6 +1,6 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder } = require('discord.js');
 const { getPrisma } = require('../db');
-const { ensurePointsConfig, getPointsConfig, getTopBalances, toBigInt } = require('../services/points');
+const { ensurePointsConfig, getPointsConfig, getTopBalances, buildLeaderboardEmbed } = require('../services/points');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -38,16 +38,7 @@ module.exports = {
       });
       // Envia imediatamente o painel inicial ao criar um novo registro
       const top = await getTopBalances(prisma, cfg, interaction.guildId, 20);
-      const embed = new EmbedBuilder()
-        .setTitle('Leaderboard de Pontos')
-        .setColor(0x00b0f4)
-        .setTimestamp(new Date())
-        .setFooter({ text: `Painel atualizará a cada ${refresh} min` })
-        .setDescription(top.length
-          ? top
-              .map((bal, idx) => `**${idx + 1}.** <@${bal.userId}> — **${toBigInt(bal.points)}** pts`)
-              .join('\n')
-          : 'Nenhum dado ainda.');
+      const embed = buildLeaderboardEmbed(top, channel.guild, refresh);
       const sent = await channel.send({ embeds: [embed] }).catch(() => null);
       if (sent) {
         await prisma.pointsLeaderboardPanel.update({ where: { id: panel.id }, data: { messageId: sent.id, lastRefreshAt: new Date() } });

@@ -138,7 +138,7 @@ async function presentMenu(interaction, ctx) {
   const prisma = ctx.getPrisma();
   const cfg = await ensureModerationConfig(prisma);
   const embed = buildSummaryEmbed(cfg, interaction.guild);
-  await interaction.update({ embeds: [embed], components: summaryComponents() });
+  await safeUpdate(interaction, { embeds: [embed], components: summaryComponents() });
   return true;
 }
 

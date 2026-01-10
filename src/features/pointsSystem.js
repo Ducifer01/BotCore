@@ -1,4 +1,3 @@
-const { EmbedBuilder } = require('discord.js');
 const {
   getPointsConfig,
   ensurePointsConfig,
@@ -10,7 +9,7 @@ const {
   confirmPendingInvites,
   getTopBalances,
   isSystemEnabled,
-  toBigInt,
+  buildLeaderboardEmbed,
 } = require('../services/points');
 const { getPrisma } = require('../db');
 
@@ -107,7 +106,7 @@ async function refreshLeaderboards(prisma, cfg) {
       const channel = await clientRef.channels.fetch(panel.channelId).catch(() => null);
       if (!channel || !channel.isTextBased()) continue;
       const top = await getTopBalances(prisma, cfg, panel.guildId, 20);
-      const embed = buildLeaderboardEmbed(top, channel.guild, cfg, panel.refreshMinutes || cfg.leaderboardRefreshMinutes || 10);
+  const embed = buildLeaderboardEmbed(top, channel.guild, panel.refreshMinutes || cfg.leaderboardRefreshMinutes || 10);
       if (panel.messageId) {
         const msg = await channel.messages.fetch(panel.messageId).catch(() => null);
         if (msg) {
@@ -129,25 +128,6 @@ async function refreshLeaderboards(prisma, cfg) {
       console.warn('[points] falha ao atualizar painel', err?.message || err);
     }
   }
-}
-
-function buildLeaderboardEmbed(balances, guild, cfg, refreshMinutes) {
-  const embed = new EmbedBuilder()
-    .setTitle('Leaderboard de Pontos')
-    .setColor(0x00b0f4)
-    .setTimestamp(new Date())
-    .setFooter({ text: `Painel atualizará a cada ${refreshMinutes} min` });
-  if (!balances?.length) {
-    embed.setDescription('Nenhum dado ainda.');
-    return embed;
-  }
-  const lines = balances.map((bal, idx) => {
-    const pos = idx + 1;
-    const mention = guild?.members?.cache?.get(bal.userId)?.toString() || `<@${bal.userId}>`;
-    return `**${pos}.** ${mention} — **${toBigInt(bal.points)}** pts`;
-  });
-  embed.setDescription(lines.join('\n'));
-  return embed;
 }
 
 function register(client) {

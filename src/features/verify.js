@@ -46,6 +46,14 @@ function cacheThreadTargetUser(threadId, userId) {
   return userId;
 }
 
+async function safeEphemeral(interaction, payload) {
+  const message = { ...payload, ephemeral: payload?.ephemeral ?? true };
+  if (interaction.deferred || interaction.replied) {
+    return interaction.followUp(message).catch(() => {});
+  }
+  return interaction.reply(message).catch(() => {});
+}
+
 function extractUserIdFromThreadName(name) {
   if (!name) return null;
   // Suporta formato legado: verif-<userId>-<username>
@@ -142,13 +150,13 @@ async function handleInteraction(interaction, ctx) {
   const cfg = await getGlobalConfig(prisma);
   const instaCheck = requireInstaConfig(cfg);
   if (!instaCheck.ok) {
-    await interaction.reply({ content: instaCheck.message, ephemeral: true });
+    await safeEphemeral(interaction, { content: instaCheck.message, ephemeral: true });
     return true;
   }
   if (!interaction.member.roles.cache.has(cfg.mainRoleId)) {
     const isSelfGrant = customId.startsWith('verify:grantrole:');
     if (!isSelfGrant && customId !== 'verify:open') {
-      await interaction.reply({ content: 'Apenas o InstaMod pode usar este botão.', ephemeral: true });
+      await safeEphemeral(interaction, { content: 'Apenas o InstaMod pode usar este botão.', ephemeral: true });
       return true;
     }
   }
@@ -169,9 +177,10 @@ async function handleInteraction(interaction, ctx) {
 }
 
 async function openThread(interaction, cfg, prisma) {
+  await interaction.deferReply({ ephemeral: true }).catch(() => {});
   const channel = interaction.channel;
   if (!channel || channel.type !== ChannelType.GuildText) {
-    await interaction.reply({ content: 'Este botão deve ser usado em um canal de texto.', ephemeral: true });
+    await interaction.editReply({ content: 'Este botão deve ser usado em um canal de texto.' }).catch(() => {});
     return true;
   }
 
@@ -202,13 +211,13 @@ async function openThread(interaction, cfg, prisma) {
     const baseMessage = ensuredRole
       ? `Ei, eu vi aqui no sistema que você já está verificado. Adicionei o cargo no seu perfil. Caso por algum motivo você ainda esteja sem o cargo, clique no botão abaixo para pegá-lo.`
       : 'Nosso sistema indica que você já está verificado. Clique no botão abaixo para pegar o cargo verificado, caso esteja faltando.';
-    await interaction.reply({
+    await interaction.editReply({
       content: baseMessage,
-      components: components.length ? components : undefined,
-      ephemeral: true,
-    });
+      components: components.length ? components : [],
+    }).catch(() => {});
     return true;
   }
+
   try {
     const active = await channel.threads.fetchActive();
     let existing = null;
@@ -220,7 +229,7 @@ async function openThread(interaction, cfg, prisma) {
       }
     }
     if (existing) {
-      await interaction.reply({ content: `Você já possui um ticket aberto: <#${existing.id}>`, ephemeral: true });
+      await interaction.editReply({ content: `Você já possui um ticket aberto: <#${existing.id}>`, components: [] }).catch(() => {});
       return true;
     }
   } catch {}
@@ -256,19 +265,19 @@ async function openThread(interaction, cfg, prisma) {
       repliedUser: false,
     },
   });
-  await interaction.reply({ content: `Seu tópico foi aberto: <#${thread.id}>`, ephemeral: true });
+  await interaction.editReply({ content: `Seu tópico foi aberto: <#${thread.id}>`, components: [] }).catch(() => {});
   return true;
 }
 
 async function handleClose(interaction, cfg) {
   if (!cfg?.mainRoleId || !interaction.member.roles.cache.has(cfg.mainRoleId)) {
-    await interaction.reply({ content: 'Apenas o InstaMod pode encerrar.', ephemeral: true });
+    await safeEphemeral(interaction, { content: 'Apenas o InstaMod pode encerrar.' });
     return true;
   }
   const threadId = interaction.customId.split(':')[2];
   const thread = await interaction.guild.channels.fetch(threadId).catch(() => null);
   if (!thread) {
-    await interaction.reply({ content: 'Tópico não encontrado.', ephemeral: true });
+    await safeEphemeral(interaction, { content: 'Tópico não encontrado.' });
     return true;
   }
   await interaction.deferUpdate().catch(() => {});
@@ -334,7 +343,7 @@ async function handleGrantRole(interaction, cfg) {
 async function handleRemoveVerificationButtons(interaction, cfg, prisma) {
   const [, , action, targetUserId, requesterId] = interaction.customId.split(':');
   if (requesterId && requesterId !== interaction.user.id) {
-    await interaction.reply({ content: 'Apenas quem solicitou pode usar estes botões.', ephemeral: true });
+    await safeEphemeral(interaction, { content: 'Apenas quem solicitou pode usar estes botões.' });
     return true;
   }
   await interaction.deferUpdate().catch(() => {});

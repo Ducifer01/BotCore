@@ -31,7 +31,7 @@ function buildRootComponents() {
 async function presentMenu(interaction, ctx) {
   const prisma = ctx.getPrisma();
   const cfg = await ensureGlobalConfig(prisma);
-  await interaction.update({ embeds: [buildRootEmbed(cfg)], components: buildRootComponents() });
+  await interaction.editReply({ embeds: [buildRootEmbed(cfg)], components: buildRootComponents() }).catch(() => {});
   return true;
 }
 

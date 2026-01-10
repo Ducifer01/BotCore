@@ -32,6 +32,7 @@ const blacklistFeature = require('./features/blacklist');
 const protectionsFeature = require('./features/protections');
 const permissionsManager = require('./features/permissionsManager');
 const { ALLOWED_GUILD_IDS, isGuildAllowed } = require('./config');
+const { DISABLED_COMMAND_FILES } = require('./constants/disabledCommands');
 
 const client = new Client({ intents: [
   GatewayIntentBits.Guilds,
@@ -44,11 +45,7 @@ client.prisma = getPrisma();
 client.commands = new Collection();
 
 const commandsPath = path.join(__dirname, 'commands');
-const disabledCommands = new Set([
-  'copiar_perm_canal.js',
-  'copiar_perm_categoria.js',
-  'copiar_perm_cargo.js',
-]);
+const disabledCommands = new Set(DISABLED_COMMAND_FILES);
 const commandFiles = fs.readdirSync(commandsPath).filter((file) => file.endsWith('.js'));
 for (const file of commandFiles) {
   if (disabledCommands.has(file)) {
@@ -322,6 +319,33 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
 client.on('error', (err) => {
   console.error('[client error]', err);
 });
+
+async function disconnectPrisma() {
+  if (!client?.prisma) return;
+  try {
+    await client.prisma.$disconnect();
+  } catch (err) {
+    console.warn('[shutdown] Falha ao desconectar Prisma:', err?.message || err);
+  }
+}
+
+function registerShutdownHandlers() {
+  const handleSignal = (signal) => {
+    console.log(`[shutdown] Recebido ${signal}, finalizando recursos...`);
+    client.destroy();
+    disconnectPrisma().finally(() => {
+      process.exit(0);
+    });
+  };
+
+  process.once('SIGINT', handleSignal);
+  process.once('SIGTERM', handleSignal);
+  process.on('beforeExit', () => {
+    disconnectPrisma().catch(() => {});
+  });
+}
+
+registerShutdownHandlers();
 
 const token = process.env.BOT_TOKEN || process.env.DISCORD_TOKEN;
 if (!token) {

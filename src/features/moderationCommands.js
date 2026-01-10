@@ -10,7 +10,7 @@ const { checkAccessForMember } = require('../permissions');
 const PREFIX = '!';
 const TEMP_MESSAGE_TTL = 15000;
 const LOG_PREVIEW_TTL = 20000;
-const BLACKLIST_MESSAGE_TTL = 10000;
+const BLACKLIST_MESSAGE_TTL = 15000;
 
 class CommandUsageError extends Error {
   constructor(message, usageKey) {

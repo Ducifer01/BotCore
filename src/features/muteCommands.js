@@ -5,7 +5,7 @@ const { sendLogMessage, checkHierarchy } = require('../lib/moderation');
 
 const PREFIX = '!';
 const TEMP_MESSAGE_TTL = 10000;
-const EMBED_TTL = 5000;
+const EMBED_TTL = 15000;
 const PERMISSION_ERROR_COLOR = 0xed4245;
 
 class CommandUsageError extends Error {

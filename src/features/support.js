@@ -59,34 +59,59 @@ function hasSupportPermission(member, cfg) {
   return roleIds.some(roleId => member.roles.cache.has(roleId));
 }
 
+async function safeEphemeral(interaction, payload) {
+  const message = { ...payload, ephemeral: payload?.ephemeral ?? true };
+  if (interaction.deferred || interaction.replied) {
+    return interaction.followUp(message).catch(() => {});
+  }
+  return interaction.reply(message).catch(() => {});
+}
+
 async function ensureSupportConfig(prisma) {
   const cfg = await prisma.globalConfig.findFirst({ include: { supportRolesGlobal: true } });
   return cfg || null;
 }
 
 async function handleSupportOpen(interaction) {
+  await interaction.deferReply({ ephemeral: true }).catch(() => {});
   const prisma = getPrisma();
   const cfg = await ensureSupportConfig(prisma);
   if (!cfg?.supportPanelChannelId) {
-    return interaction.reply({ content: 'O sistema de suporte não está configurado ainda.', ephemeral: true });
-  }
-  const guild = interaction.guild;
-  if (!guild) {
-    return interaction.reply({ content: 'Esta ação só pode ser usada no servidor.', ephemeral: true });
-  }
-  const panelChannel = guild.channels.cache.get(cfg.supportPanelChannelId) || await guild.channels.fetch(cfg.supportPanelChannelId).catch(() => null);
-  if (!panelChannel || panelChannel.type !== ChannelType.GuildText) {
-    return interaction.reply({ content: 'O canal de suporte configurado é inválido ou inacessível.', ephemeral: true });
-  }
-  if (interaction.channelId !== panelChannel.id) {
-    return interaction.reply({ content: 'Use o painel oficial para abrir o ticket.', ephemeral: true });
+    await interaction.editReply({ content: 'O sistema de suporte não está configurado ainda.' }).catch(() => {});
+    return true;
   }
 
-  let existing = await prisma.supportTicket.findFirst({ where: { openerId: interaction.user.id, closedAt: null } });
+  const guild = interaction.guild;
+  if (!guild) {
+    await interaction.editReply({ content: 'Esta ação só pode ser usada no servidor.' }).catch(() => {});
+    return true;
+  }
+
+  const panelChannel = guild.channels.cache.get(cfg.supportPanelChannelId)
+    || await guild.channels.fetch(cfg.supportPanelChannelId).catch(() => null);
+  if (!panelChannel || panelChannel.type !== ChannelType.GuildText) {
+    await interaction.editReply({ content: 'O canal de suporte configurado é inválido ou inacessível.' }).catch(() => {});
+    return true;
+  }
+
+  if (interaction.channelId !== panelChannel.id) {
+    await interaction.editReply({ content: 'Use o painel oficial para abrir o ticket.' }).catch(() => {});
+    return true;
+  }
+
+  const userId = interaction.user.id;
+  let existing = await prisma.supportTicket.findFirst({
+    where: {
+      guildId: guild.id,
+      openerId: userId,
+      closedAt: null,
+    },
+  });
   if (existing) {
     const previousThread = await guild.channels.fetch(existing.threadId).catch(() => null);
     if (previousThread) {
-      return interaction.reply({ content: `Você já possui um ticket aberto: <#${existing.threadId}>`, ephemeral: true });
+      await interaction.editReply({ content: `Você já possui um ticket aberto: <#${existing.threadId}>` }).catch(() => {});
+      return true;
     }
     await prisma.supportTicket.update({ where: { id: existing.id }, data: { closedAt: new Date(), closedBy: 'system' } });
     existing = null;
@@ -102,7 +127,7 @@ async function handleSupportOpen(interaction) {
   });
 
   const supportRoleIds = extractSupportRoleIds(cfg);
-  const mentions = [...supportRoleIds.map(id => `<@&${id}>`), `<@${interaction.user.id}>`].filter(Boolean).join(' ') || undefined;
+  const mentions = [...supportRoleIds.map(id => `<@&${id}>`), `<@${userId}>`].filter(Boolean).join(' ') || undefined;
   const embed = buildTicketThreadEmbed();
   const buttons = buildTicketButtons(thread.id);
 
@@ -112,7 +137,7 @@ async function handleSupportOpen(interaction) {
     components: [buttons],
     allowedMentions: {
       roles: supportRoleIds,
-      users: [interaction.user.id],
+      users: [userId],
       repliedUser: false,
     },
   });
@@ -122,12 +147,13 @@ async function handleSupportOpen(interaction) {
       threadId: thread.id,
       channelId: panelChannel.id,
       guildId: guild.id,
-      openerId: interaction.user.id,
+      openerId: userId,
       openerTag: interaction.user.tag,
     },
   });
 
-  return interaction.reply({ content: `Ticket aberto: <#${thread.id}>`, ephemeral: true });
+  await interaction.editReply({ content: `Ticket aberto: <#${thread.id}>` }).catch(() => {});
+  return true;
 }
 
 async function disableInteractionComponents(interaction) {
@@ -149,29 +175,33 @@ async function closeTicket(interaction, threadId, { allowAuthor = false } = {}) 
   const prisma = getPrisma();
   const cfg = await ensureSupportConfig(prisma);
   if (!cfg) {
-    return interaction.reply({ content: 'O sistema de suporte não está configurado.', ephemeral: true });
+    await safeEphemeral(interaction, { content: 'O sistema de suporte não está configurado.' });
+    return true;
   }
-  const ticket = await prisma.supportTicket.findFirst({ where: { threadId } });
+  const ticket = await prisma.supportTicket.findFirst({ where: { threadId, guildId: interaction.guildId } });
   if (!ticket) {
-    return interaction.reply({ content: 'Ticket não encontrado ou já encerrado.', ephemeral: true });
+    await safeEphemeral(interaction, { content: 'Ticket não encontrado ou já encerrado. Use o painel para abrir um novo atendimento.' });
+    return true;
   }
   if (ticket.closedAt) {
-    return interaction.reply({ content: 'Este ticket já foi encerrado.', ephemeral: true });
+    await safeEphemeral(interaction, { content: 'Este ticket já foi encerrado. Use o painel para abrir um novo atendimento.' });
+    return true;
   }
 
   const member = interaction.member;
   const isOwner = interaction.user.id === ticket.openerId;
   if (!allowAuthor) {
     if (!hasSupportPermission(member, cfg)) {
-      return interaction.reply({ content: 'Apenas cargos de suporte podem encerrar este ticket.', ephemeral: true });
+      await safeEphemeral(interaction, { content: 'Apenas cargos de suporte podem encerrar este ticket.' });
+      return true;
     }
   } else if (!isOwner && !hasSupportPermission(member, cfg)) {
-    return interaction.reply({ content: 'Somente o autor do ticket pode usar este botão.', ephemeral: true });
+    await safeEphemeral(interaction, { content: 'Somente o autor do ticket pode usar este botão.' });
+    return true;
   }
 
-  if (!interaction.replied && !interaction.deferred) {
-    await interaction.reply({ content: 'Encerrando Ticket', ephemeral: true });
-  }
+  await interaction.deferUpdate().catch(() => {});
+  await safeEphemeral(interaction, { content: 'Encerrando ticket...' });
 
   await disableInteractionComponents(interaction);
 
@@ -233,6 +263,9 @@ async function closeTicket(interaction, threadId, { allowAuthor = false } = {}) 
       console.error('[support] Falha ao excluir tópico de suporte:', err);
     }
   }
+
+  await safeEphemeral(interaction, { content: 'Ticket encerrado com sucesso.' });
+  return true;
 }
 
 async function handleSupportClose(interaction, threadId) {
@@ -243,17 +276,15 @@ async function handleSupportInteraction(interaction) {
   if (!interaction.isButton()) return false;
   const customId = interaction.customId;
   if (customId === 'support:open') {
-    await handleSupportOpen(interaction);
-    return true;
+    return handleSupportOpen(interaction);
   }
   if (customId.startsWith('support:close:')) {
     const threadId = customId.split(':')[2];
     if (!threadId) {
-      await interaction.reply({ content: 'Ticket inválido.', ephemeral: true });
+      await safeEphemeral(interaction, { content: 'Ticket inválido.', ephemeral: true });
       return true;
     }
-    await handleSupportClose(interaction, threadId);
-    return true;
+    return handleSupportClose(interaction, threadId);
   }
   return false;
 }

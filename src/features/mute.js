@@ -6,7 +6,7 @@ const { EmbedBuilder, AuditLogEvent, PermissionFlagsBits } = require('discord.js
 
 const CHECK_INTERVAL_MS = 15000;
 const RELEASE_DELAY_MS = 2000;
-const EXPIRATION_EMBED_TTL = 5000;
+const EXPIRATION_EMBED_TTL = 15000;
 
 let sweepInterval;
 

@@ -51,18 +51,6 @@ module.exports = {
     const totalPages = Math.max(1, Math.ceil(txs.length / PAGE_SIZE));
     let page = 1;
 
-    const render = async (i) => {
-      const start = (page - 1) * PAGE_SIZE;
-      const slice = txs.slice(start, start + PAGE_SIZE);
-      const embed = buildPageEmbed(slice, page);
-      const components = buildButtons(page, totalPages);
-      if (i.replied || i.deferred) {
-        await i.editReply({ embeds: [embed], components });
-      } else {
-        await i.reply({ embeds: [embed], components, ephemeral: true, fetchReply: true });
-      }
-    };
-
     const msg = await interaction.reply({
       embeds: [buildPageEmbed(txs.slice(0, PAGE_SIZE), page)],
       components: buildButtons(page, totalPages),

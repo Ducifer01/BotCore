@@ -17,7 +17,7 @@ module.exports = {
     }
 
     // Gate por "Permissões de Comandos"
-    const allowed = await checkAccess(interaction, 'resetar');
+  const allowed = await checkAccess(interaction, 'resetar_insta');
     if (!allowed) {
       await interaction.reply({ content: 'Você não tem permissão para usar este comando.', ephemeral: true });
       return;

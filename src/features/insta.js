@@ -264,7 +264,7 @@ async function presentMenu(interaction, ctx) {
   const cfg = await getGlobalConfig(prisma);
   const embed = buildInstaEmbed(cfg);
   const rows = buildInstaMenuRows();
-  await interaction.update({ embeds: [embed], components: rows });
+  await editPanel(interaction, { embeds: [embed], components: rows });
   return true;
 }
 
@@ -298,9 +298,9 @@ async function handleConfigButtons(interaction, ctx) {
   const action = parts[2];
   const subaction = parts[3];
 
-  // Para ação de reset, permitir também quem possui permissão via "Permissões de Comandos" (comando /resetar)
+  // Para ação de reset, permitir também quem possui permissão via "Permissões de Comandos" (comando /resetar_insta)
   if (action === 'reset') {
-    const allowedViaCommand = await checkAccess(interaction, 'resetar').catch(() => false);
+  const allowedViaCommand = await checkAccess(interaction, 'resetar_insta').catch(() => false);
     const isPosse = await ensurePosse(interaction, ctx);
     if (!allowedViaCommand && !isPosse) {
       return true;

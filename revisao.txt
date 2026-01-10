@@ -1,0 +1,54 @@
+[Arquivo: src/deploy-commands.js]
+- Problema identificado: O script registra todos os arquivos de comandos sem aplicar o filtro `disabledCommands` usado em runtime, mantendo comandos legados como `copiar_perm_canal` na sincronizacao.
+- Risco em producao: Os slash commands legados permanecem visiveis no Discord, mas o bot ignora as interacoes porque `client.commands` nao contem handlers, resultando em falhas silenciosas e suporte extra.
+- Sugestao de ajuste: Centralizar a lista de comandos desativados (ex.: exportar do mesmo modulo usado por `bot.js`) ou replicar o filtro antes de montar `commands` no deploy.
+
+[Arquivo: src/commands/resetar.js]
+- Problema identificado: O gate de permissao chama `checkAccess(interaction, 'resetar')`, enquanto o slash command registrado se chama `resetar_insta`; o sistema de permissoes grava chaves normalizadas pelo nome real do comando.
+- Risco em producao: Mesmo cargos configurados no painel de permissoes nao recebem acesso porque a entrada `resetar` nunca e populada, deixando o comando restrito ao usuario posse.
+- Sugestao de ajuste: Alinhar o identificador ao nome do comando (`resetar_insta`) ou registrar um alias consistente nas permissoes antes da validacao.
+
+[Arquivo: src/features/menu.js]
+- Problema identificado: `handleRootSelection` e `handleBack` manipulam selects/botoes sem `await interaction.deferUpdate()`, e a negativa de acesso usa `interaction.reply()` mesmo apos a mensagem original ter sido respondida.
+- Risco em producao: Interacoes que consultem Prisma ou API por mais de 3s geram `This interaction failed`; o `reply` adicional pode levantar `InteractionAlreadyReplied`, quebrando o painel unico.
+- Sugestao de ajuste: Deferir imediatamente (`deferUpdate`) e trocar mensagens de erro por `interaction.followUp({ ephemeral: true })`, mantendo o fluxo de maquina de estados seguro.
+
+[Arquivo: src/features/verify.js]
+- Problema identificado: Botoes `verify:*` (ex.: `verify:open`) executam fetch de threads, consultas Prisma e aplicacao de cargos somente respondendo ao final com `interaction.reply`, sem `deferReply`/`deferUpdate` antecipado.
+- Risco em producao: Qualquer chamada lenta excede o limite de 3s, exibindo `This interaction failed` e deixando tickets sem feedback; tambem viola a regra de painel unico descrita nas instrucoes internas.
+- Sugestao de ajuste: Para fluxos que respondem ao usuario, usar `await interaction.deferReply({ ephemeral: true })` seguido de `editReply`; para botoes que apenas mudam estado, chamar `deferUpdate` antes das operacoes.
+
+[Arquivo: src/features/support.js]
+- Problema identificado: `handleSupportOpen` e `closeTicket` tratam botoes `support:open`/`support:close` sem defer, e a verificacao de tickets reusa `prisma.supportTicket.findFirst({ where: { openerId } })` sem filtrar por `guildId`.
+- Risco em producao: Criar ou encerrar threads pode ultrapassar 3s gerando timeout visivel; alem disso, um ticket aberto em outra guilda bloqueia o mesmo usuario localmente e pode causar encerramentos incorretos.
+- Sugestao de ajuste: Aplicar `deferReply`/`deferUpdate` no inicio dos handlers e incluir `guildId: interaction.guildId` (ou um indice composto) em todas as consultas de ticket.
+
+[Arquivo: src/commands/historico_pontos.js]
+- Problema identificado: A funcao auxiliar `render` e declarada mas nunca chamada; a logica de renderizacao principal replica manualmente a mesma montagem de embed e botoes.
+- Risco em producao: Codigo morto dificulta manutencao e sugere fluxo incompleto; futuras alteracoes podem divergir e introduzir inconsistencias.
+- Sugestao de ajuste: Remover a funcao ou reutiliza-la ao atualizar paginas, garantindo um unico caminho de renderizacao.
+
+[Arquivo: src/bot.js]
+- Problema identificado: O `PrismaClient` obtido em `client.prisma = getPrisma()` nao e encerrado em sinais de desligamento (`SIGINT`, `SIGTERM`).
+- Risco em producao: Reinicios podem gerar avisos de conexao pendente e, em ambientes que reciclam processos, deixar transacoes abertas ou prender handles.
+- Sugestao de ajuste: Adicionar handlers de encerramento chamando `client.prisma.$disconnect()` em `beforeExit`/`SIGINT`/`SIGTERM` para liberar recursos.
+
+[Arquivos candidatos a exclusao]
+- src/commands/copiar_perm_canal.js -> legado ignorado pelo loader (lista `disabledCommands`) e substituido por `/permissoes`.
+- src/commands/copiar_perm_categoria.js -> legado ignorado pelo loader e substituido por `/permissoes`.
+- src/commands/copiar_perm_cargo.js -> legado ignorado pelo loader e substituido por `/permissoes`.
+
+[Funcoes duplicadas ou mesclaveis]
+- buildLeaderboardEmbed em src/features/pointsSystem.js
+- Montagem do embed em src/commands/painel_pontos.js
+-> sugestao de unificacao: extrair a construcao do leaderboard para `src/services/points.js` e reutilizar em ambos os fluxos.
+
+[Prisma]
+- Query que pode retornar null sem validacao: `await prisma.supportTicket.findFirst({ where: { openerId: interaction.user.id, closedAt: null } })`.
+- Arquivo: src/features/support.js.
+- Sugestao: incluir `guildId: interaction.guildId` (ou indice composto guildId+openerId) e tratar explicitamente o caso vazio para evitar bloqueios entre servidores e leituras inconsistentes.
+
+[Mensagens e textos]
+- Local: src/features/support.js (tratativa de botoes `support:close` quando o ticket nao e encontrado).
+- Texto atual: "Ticket invalido.".
+- Sugestao de melhoria: Expandir para algo como "Ticket nao encontrado ou ja encerrado. Use o painel para abrir um novo atendimento." a fim de orientar o usuario e reduzir chamados repetidos.
