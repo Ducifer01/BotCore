@@ -44,7 +44,6 @@ const MODALS = {
 const MODULES = [
   { id: 'antiRoleHierarchy', label: 'Anti Hierarquia de Cargos', hasLimit: false, hasLog: true, hasWhitelist: true, hasPunish: true, extras: ['roleLimit', 'protectPerms'] },
   { id: 'antiBotAdd', label: 'Anti Bot Add', hasLog: true, hasWhitelist: true, hasPunish: true },
-  { id: 'antiWebhook', label: 'Anti Webhook', hasLog: true, hasWhitelist: true, hasPunish: true, hasLimit: true },
   { id: 'antiCriticalPerms', label: 'Anti Permissão Crítica', hasLog: true, hasWhitelist: true, hasPunish: true, extras: ['blockedPerms'] },
   { id: 'antiAlt', label: 'Anti ALT', hasLog: true, hasWhitelist: false, hasPunish: true, extras: ['minDays'] },
   { id: 'massBanKick', label: 'Proteção Ban/Kick massivo', hasLog: true, hasWhitelist: true, hasPunish: true, hasLimit: true },
@@ -150,9 +149,6 @@ function buildModuleEmbed(module, cfg) {
     fields.push({ name: 'Cargo limite', value: state.limitRoleId ? `<@&${state.limitRoleId}>` : '—', inline: true });
     fields.push({ name: 'Proteger permissões', value: state.protectPermissions ? 'Sim' : 'Não', inline: true });
     fields.push({ name: 'Anti-set cargos', value: state.preventProtectedRoleGive ? 'Sim' : 'Não', inline: true });
-  }
-  if (module.id === 'antiWebhook') {
-    fields.push({ name: 'Rate', value: `${state.rate?.count}/${state.rate?.seconds || 60}s (bypass: ${state.whitelistBypassRate ? 'sim' : 'não'})`, inline: true });
   }
   if (module.id === 'antiCriticalPerms') {
     fields.push({ name: 'Perms bloqueadas', value: state.blockedPerms?.length ? state.blockedPerms.join(', ') : '—', inline: false });

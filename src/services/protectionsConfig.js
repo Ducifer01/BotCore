@@ -41,15 +41,6 @@ function defaultConfig() {
       whitelistRoles: [],
       botAction: 'KICK', // KICK or BAN for the new bot
     },
-    antiWebhook: {
-      enabled: false,
-      punishment: PUNISH.STRIP_ROLES,
-      logChannelId: null,
-      whitelistUsers: [],
-      whitelistRoles: [],
-      rate: { count: 3, seconds: 60 },
-      whitelistBypassRate: true,
-    },
     antiCriticalPerms: {
       enabled: false,
       punishment: PUNISH.STRIP_ROLES,
@@ -115,11 +106,6 @@ function mergeConfig(raw) {
     ...raw,
     antiRoleHierarchy: { ...base.antiRoleHierarchy, ...raw?.antiRoleHierarchy },
     antiBotAdd: { ...base.antiBotAdd, ...raw?.antiBotAdd },
-    antiWebhook: {
-      ...base.antiWebhook,
-      ...raw?.antiWebhook,
-      rate: { ...base.antiWebhook.rate, ...(raw?.antiWebhook?.rate || {}) },
-    },
     antiCriticalPerms: {
       ...base.antiCriticalPerms,
       ...raw?.antiCriticalPerms,

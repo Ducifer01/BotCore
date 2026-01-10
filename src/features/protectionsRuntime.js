@@ -144,7 +144,6 @@ function ensureArrays(cfg) {
 
 function createRuntime() {
   const limiter = {
-    webhook: new Counter(),
     ban: new Counter(),
     timeout: new Counter(),
     channelDelete: new Counter(),
@@ -155,6 +154,7 @@ function createRuntime() {
 
   // Evita loop ao dar rollback em cargos
   const suppressRoleUpdate = new Set();
+
 
   async function handleGuildRoleUpdate(oldRole, newRole, prisma) {
     if (suppressRoleUpdate.has(newRole.id)) return;
@@ -281,23 +281,6 @@ function createRuntime() {
     await logAction(guild, cfg.massChannelDelete.logChannelId, embed);
   }
 
-  async function handleWebhookCreate(webhook, prisma) {
-    const cfg = await getProtectionsConfig(prisma);
-    if (!cfg.antiWebhook.enabled) return;
-    const guild = webhook.guild;
-    const executor = await fetchAuditExecutor(guild, AuditLogEvent.WebhookCreate, webhook.id);
-    const member = executor ? await guild.members.fetch(executor.id).catch(() => null) : null;
-    const whitelisted = isWhitelisted(executor?.id, member, cfg.antiWebhook.whitelistUsers, cfg.antiWebhook.whitelistRoles);
-    const limit = cfg.antiWebhook.rate;
-    const count = limiter.webhook.hit(`${executor?.id || 'unknown'}`, limit.seconds);
-    const exceeded = !whitelisted || (!cfg.antiWebhook.whitelistBypassRate && count >= limit.count) || (count >= limit.count);
-    if (!exceeded) return;
-
-    await webhook.delete('Proteção: anti-webhook').catch(() => {});
-    if (member) await punishMember(member, cfg.antiWebhook.punishment, 'Proteção: webhook');
-    const embed = buildBaseEmbed('Proteção: Webhook', executor, webhook, `Webhook removido. Contagem ${count}/${limit.count} em ${limit.seconds}s`);
-    await logAction(guild, cfg.antiWebhook.logChannelId, embed);
-  }
 
   async function handleBotAdd(member, prisma) {
     if (!member.user.bot) return;
@@ -485,9 +468,7 @@ function createRuntime() {
         handleChannelDelete(channel, prisma).catch((err) => console.error('[protections] channelDelete', err));
       });
 
-      client.on('webhookCreate', (webhook) => {
-        handleWebhookCreate(webhook, prisma).catch((err) => console.error('[protections] webhookCreate', err));
-      });
+      // antiWebhook removido
 
       client.on('guildMemberAdd', (member) => {
         handleBotAdd(member, prisma).catch((err) => console.error('[protections] botAdd', err));
