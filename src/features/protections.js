@@ -14,6 +14,7 @@ const {
 } = require('discord.js');
 const { ensureGuild } = require('../permissions');
 const { getProtectionsConfig, saveProtectionsConfig, PUNISH, DEFAULT_CRITICAL_PERMS } = require('../services/protectionsConfig');
+const { BACKUP_SCOPES, createBackup, listBackups, countBackups, diffBackup, restoreBackup, getBackup } = require('../services/backups');
 
 const CUSTOM_IDS = {
   ROOT: 'menu:protections:root',
@@ -21,6 +22,7 @@ const CUSTOM_IDS = {
   GLOBAL_WH: 'menu:protections:globalwh',
   GLOBAL_WH_USERS: 'menu:protections:globalwhusers',
   GLOBAL_WH_ROLES: 'menu:protections:globalwhroles',
+  BACKUP: (action, extra) => `prot:backup:${action}${extra ? `:${extra}` : ''}`,
   TOGGLE: (m) => `prot:toggle:${m}`,
   PUNISH: (m) => `prot:punish:${m}`,
   LIMIT: (m) => `prot:limit:${m}`,
@@ -43,6 +45,7 @@ const MODALS = {
   LIMIT: (m, msg) => `protmodal:limit:${m}:${msg || '0'}`,
   WHITELIST: (m, msg) => `protmodal:wh:${m}:${msg || '0'}`,
   MIN_DAYS: (m, msg) => `protmodal:mindays:${m}:${msg || '0'}`,
+  BACKUP_NAME: (msg) => `protmodal:backup:name:${msg || '0'}`,
 };
 
 const MODULES = [
@@ -58,6 +61,22 @@ const MODULES = [
   { id: 'massDisconnect', label: 'Proteção desconectar massivo', hasLog: true, hasWhitelist: true, hasPunish: true, hasLimit: true },
   { id: 'massMuteDeafen', label: 'Proteção mute/deafen massivo', hasLog: true, hasWhitelist: true, hasPunish: true, hasLimit: true },
 ];
+
+const BACKUP_STATES = {
+  HOME: 'HOME',
+  CREATE_SCOPE: 'CREATE_BACKUP_SELECT_SCOPE',
+  CREATE_NAME: 'CREATE_BACKUP_NAMING',
+  CREATING: 'CREATING_BACKUP',
+  DONE_CREATE: 'DONE_CREATE',
+  SELECT_BACKUP: 'SELECT_BACKUP',
+  VERIFYING: 'VERIFYING',
+  SHOW_DIFF: 'SHOW_DIFF',
+  CONFIRM_RESTORE: 'CONFIRM_RESTORE',
+  SELECT_RESTORE_SCOPE: 'SELECT_RESTORE_SCOPE',
+  RESTORING: 'RESTORING',
+  DONE_RESTORE: 'DONE_RESTORE',
+  CANCELLED: 'CANCELLED',
+};
 
 const CRITICAL_PERM_LABELS = {
   Administrator: 'Administrador',
@@ -95,15 +114,16 @@ async function respond(interaction, payload) {
   if (!interaction?.isRepliable?.()) return;
   if (interaction.isMessageComponent?.()) {
     if (!interaction.deferred && !interaction.replied) {
-      await interaction.deferUpdate().catch(() => {});
+      await interaction.deferUpdate().catch((e) => console.error('[protections][respond] deferUpdate failed', e));
     }
-    await interaction.editReply(payload).catch(() => {});
+    // Em componentes, manter atualização via editReply (seguro para ephemeral); evitar message.edit para não bater 10008
+    await interaction.editReply(payload).catch((e) => console.error('[protections][respond] editReply failed', e));
     return;
   }
   if (interaction.deferred || interaction.replied) {
-    await interaction.editReply(payload).catch(() => {});
+    await interaction.editReply(payload).catch((e) => console.error('[protections][respond] editReply failed', e));
   } else {
-    await interaction.reply({ ...payload, ephemeral: true }).catch(() => {});
+    await interaction.reply({ ...payload, ephemeral: true }).catch((e) => console.error('[protections][respond] reply failed', e));
   }
 }
 
@@ -134,6 +154,11 @@ function buildRootEmbed(cfg) {
         value: `${cfg?.globalWhitelistUsers?.length || 0} usuários / ${cfg?.globalWhitelistRoles?.length || 0} cargos`,
         inline: true,
       },
+      {
+        name: 'Backups',
+        value: 'Gerencie backups pelo menu Backups',
+        inline: true,
+      },
     )
     .addFields(
       MODULES.filter((m) => !m.disabled).map((m) => ({
@@ -156,7 +181,14 @@ function buildRootComponents(selected) {
         description: m.disabled ? 'Em breve' : 'Configurar módulo',
         default: selected === m.id,
         emoji: m.disabled ? '⏳' : undefined,
-      })),
+      })).concat([
+        {
+          label: 'Backups e Snapshots',
+          value: 'backups',
+          description: 'Criar, verificar e restaurar backups',
+          default: selected === 'backups',
+        },
+      ]),
     );
   const row = new ActionRowBuilder().addComponents(select);
   const back = new ActionRowBuilder().addComponents(
@@ -388,12 +420,310 @@ function buildGlobalWhitelistComponents(cfg) {
   return rows;
 }
 
+// --------- Backups / Snapshots ---------
+const DEFAULT_BACKUP_SCOPES = [BACKUP_SCOPES.CHANNELS, BACKUP_SCOPES.ROLES];
+const backupSessions = new Map();
+
+function backupSessionKey(interaction) {
+  // Preferimos chave estável por mensagem (painel único).
+  // Para modais: customId carrega o messageId original em protmodal:backup:<type>:<messageId>
+  if (interaction?.isModalSubmit?.()) {
+    const parts = String(interaction.customId || '').split(':');
+    const maybeMsg = parts[3];
+    if (maybeMsg && maybeMsg !== '0') return maybeMsg;
+  }
+  return interaction?.message?.id || interaction?.id || 'session';
+}
+
+function getBackupSession(interaction) {
+  const base = {
+    state: BACKUP_STATES.HOME,
+    scopes: [...DEFAULT_BACKUP_SCOPES],
+    name: '',
+    page: 0,
+    mode: 'home',
+    selectedBackupId: null,
+    diff: null,
+    lastBackup: null,
+    restoreScopes: null,
+  };
+  const existing = backupSessions.get(backupSessionKey(interaction));
+  return existing ? { ...base, ...existing } : base;
+}
+
+function setBackupSession(interaction, data) {
+  const merged = { ...getBackupSession(interaction), ...data };
+  backupSessions.set(backupSessionKey(interaction), merged);
+  return merged;
+}
+
+function clearBackupSession(interaction) {
+  backupSessions.delete(backupSessionKey(interaction));
+}
+
+function backupScopeOptions(scopes = []) {
+  return [
+    { label: 'Canais + Categorias', value: BACKUP_SCOPES.CHANNELS, default: scopes.includes(BACKUP_SCOPES.CHANNELS) },
+    { label: 'Cargos', value: BACKUP_SCOPES.ROLES, default: scopes.includes(BACKUP_SCOPES.ROLES) },
+  ];
+}
+
+function buildBackupButtonsHome() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('start', 'create')).setLabel('➕ Criar backup').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('start', 'verify')).setLabel('🔍 Verificar backup').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('start', 'restore')).setLabel('♻️ Restaurar backup').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(CUSTOM_IDS.ROOT).setLabel('Voltar').setStyle(ButtonStyle.Secondary),
+  );
+}
+
+async function buildBackupPayload(interaction, prisma, session) {
+  const guild = interaction.guild;
+  const state = session.state;
+  const embed = new EmbedBuilder().setColor(0x5865f2);
+  const components = [];
+
+  const pushBackHome = () => {
+    components.push(new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('home')).setLabel('Voltar ao início').setStyle(ButtonStyle.Secondary)));
+  };
+
+  if (state === BACKUP_STATES.HOME) {
+    embed
+      .setTitle('🛡️ Sistema de Backup do Servidor')
+      .setDescription('Escolha uma ação:');
+    components.push(buildBackupButtonsHome());
+    return { embeds: [embed], components };
+  }
+
+  if (state === BACKUP_STATES.CREATE_SCOPE) {
+    embed
+      .setTitle('📦 Criar Backup')
+      .setDescription('O que você deseja salvar?');
+    components.push(
+      new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(CUSTOM_IDS.BACKUP('scope'))
+          .setPlaceholder('Selecione escopos')
+          .setMinValues(1)
+          .setMaxValues(2)
+          .addOptions(backupScopeOptions(session.scopes)),
+      ),
+    );
+    components.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('next:naming')).setLabel('Próximo').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('cancel')).setLabel('Cancelar').setStyle(ButtonStyle.Secondary),
+      ),
+    );
+    pushBackHome();
+    return { embeds: [embed], components };
+  }
+
+  if (state === BACKUP_STATES.CREATE_NAME) {
+    embed
+      .setTitle('📝 Nome do Backup (opcional)')
+      .setDescription(`Nome atual: ${session.name ? `**${session.name}**` : 'Nenhum'}`);
+    components.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('modal:name')).setLabel('Definir nome').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('create')).setLabel('Criar backup').setStyle(ButtonStyle.Success),
+      ),
+    );
+    components.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('back:scope')).setLabel('Voltar').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('cancel')).setLabel('Cancelar').setStyle(ButtonStyle.Secondary),
+      ),
+    );
+    return { embeds: [embed], components };
+  }
+
+  if (state === BACKUP_STATES.CREATING) {
+    embed.setTitle('⏳ Criando backup...').setDescription('Isso pode levar alguns segundos.');
+    pushBackHome();
+    return { embeds: [embed], components };
+  }
+
+  if (state === BACKUP_STATES.DONE_CREATE) {
+    const b = session.lastBackup;
+    embed
+      .setTitle('✅ Backup criado com sucesso!')
+      .setDescription([
+        `ID: ${b?.backupId || '—'}`,
+        `Nome: ${b?.name || '—'}`,
+        `Escopos: ${(b?.scopes || []).join(', ') || '—'}`,
+      ].join('\n'));
+    components.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('home')).setLabel('Voltar ao início').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('start:verify')).setLabel('Ver backups').setStyle(ButtonStyle.Primary),
+      ),
+    );
+    return { embeds: [embed], components };
+  }
+
+  if (state === BACKUP_STATES.SELECT_BACKUP) {
+    const take = 25;
+    const total = await countBackups(prisma, guild.id);
+    const maxPage = Math.max(0, Math.ceil(total / take) - 1);
+    const page = Math.min(session.page || 0, maxPage);
+    const list = await listBackups(prisma, guild.id, { skip: page * take, take });
+    embed
+      .setTitle('📂 Selecione um backup')
+      .setDescription(total ? `Página ${page + 1}/${maxPage + 1}` : 'Nenhum backup encontrado.');
+    const select = new StringSelectMenuBuilder()
+      .setCustomId(CUSTOM_IDS.BACKUP('select'))
+      .setPlaceholder(total ? 'Escolha um backup' : 'Nenhum backup disponível')
+      .setMinValues(1)
+      .setMaxValues(1)
+      .setDisabled(!total)
+      .addOptions(
+        (list || []).map((b) => ({
+          label: b.name || b.backupId,
+          value: b.backupId,
+          description: new Date(b.createdAt).toLocaleString('pt-BR'),
+        })),
+      );
+    components.push(new ActionRowBuilder().addComponents(select));
+    const nav = [];
+    if (maxPage > 0) {
+      nav.push(new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP(`page:${Math.max(0, page - 1)}`)).setEmoji('◀️').setStyle(ButtonStyle.Secondary).setDisabled(page <= 0));
+      nav.push(new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP(`page:${Math.min(maxPage, page + 1)}`)).setEmoji('▶️').setStyle(ButtonStyle.Secondary).setDisabled(page >= maxPage));
+    }
+    nav.push(new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('cancel')).setLabel('Cancelar').setStyle(ButtonStyle.Secondary));
+    nav.push(new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('home')).setLabel('Voltar início').setStyle(ButtonStyle.Secondary));
+    components.push(new ActionRowBuilder().addComponents(nav));
+    return { embeds: [embed], components };
+  }
+
+  if (state === BACKUP_STATES.VERIFYING) {
+    embed.setTitle('🔍 Verificando diferenças...');
+    pushBackHome();
+    return { embeds: [embed], components };
+  }
+
+  if (state === BACKUP_STATES.SHOW_DIFF) {
+    const diff = session.diff || {};
+    embed.setTitle('📊 Diferenças encontradas');
+    if (diff.channels) {
+      embed.addFields({
+        name: 'Canais + Categorias',
+        value: `Ausentes: ${diff.channels.missing.length} | Alterados: ${diff.channels.changed.length}`,
+        inline: false,
+      });
+    }
+    if (diff.roles) {
+      embed.addFields({
+        name: 'Cargos',
+        value: `Ausentes: ${diff.roles.missing.length} | Alterados: ${diff.roles.changed.length}`,
+        inline: false,
+      });
+    }
+    components.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('start:verify')).setLabel('Voltar').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('restore:fromdiff')).setLabel('♻️ Restaurar com base neste backup').setStyle(ButtonStyle.Success),
+      ),
+    );
+    return { embeds: [embed], components };
+  }
+
+  if (state === BACKUP_STATES.CONFIRM_RESTORE) {
+    embed
+      .setTitle('⚠️ Confirmação necessária')
+      .setDescription('O bot fará alterações no servidor. Deseja continuar?');
+    components.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('confirm')).setLabel('Prosseguir').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('cancel')).setLabel('Cancelar').setStyle(ButtonStyle.Secondary),
+      ),
+    );
+    pushBackHome();
+    return { embeds: [embed], components };
+  }
+
+  if (state === BACKUP_STATES.SELECT_RESTORE_SCOPE) {
+    const backup = session.lastBackup || (session.selectedBackupId ? await getBackup(prisma, session.selectedBackupId, guild.id) : null);
+    const scopes = backup?.scopes || DEFAULT_BACKUP_SCOPES;
+    embed
+      .setTitle('🧩 O que deseja restaurar?')
+      .setDescription('Selecione os escopos para restaurar.');
+    components.push(
+      new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(CUSTOM_IDS.BACKUP('restore:scope'))
+          .setPlaceholder('Selecione escopos para restaurar')
+          .setMinValues(1)
+          .setMaxValues(scopes.length)
+          .addOptions(backupScopeOptions(session.restoreScopes || scopes)),
+      ),
+    );
+    components.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('do_restore')).setLabel('Restaurar').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('cancel')).setLabel('Cancelar').setStyle(ButtonStyle.Secondary),
+      ),
+    );
+    pushBackHome();
+    return { embeds: [embed], components };
+  }
+
+  if (state === BACKUP_STATES.RESTORING) {
+    const st = session.restoreStatus || {};
+    const total = st.total || (session.restoreScopes?.length || 1);
+    const stage = st.stage || 0;
+    const percent = st.percent ?? Math.round((stage / Math.max(total, 1)) * 100);
+    embed
+      .setTitle('♻️ Restaurando servidor...')
+      .setDescription([
+        `Etapas: ${stage}/${total}`,
+        st.label ? `Etapa atual: ${st.label}` : null,
+        `Progresso: ${percent}%`,
+        st.message || null,
+      ].filter(Boolean).join('\n'));
+    pushBackHome();
+    return { embeds: [embed], components };
+  }
+
+  if (state === BACKUP_STATES.DONE_RESTORE) {
+    const res = session.restoreResult || {};
+    const channels = res.channels || { created: 0, updated: 0 };
+    const roles = res.roles || { created: 0, updated: 0 };
+    embed
+      .setTitle('✅ Restauração concluída')
+      .setDescription(`Canais criados/atualizados: ${channels.created}/${channels.updated}\nCargos criados/atualizados: ${roles.created}/${roles.updated}`);
+    components.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('home')).setLabel('Voltar ao início').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('start:verify')).setLabel('Ver backups').setStyle(ButtonStyle.Primary),
+      ),
+    );
+    return { embeds: [embed], components };
+  }
+
+  if (state === BACKUP_STATES.CANCELLED) {
+    embed.setTitle('🚫 Operação cancelada');
+    components.push(new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('home')).setLabel('Voltar ao início').setStyle(ButtonStyle.Secondary)));
+    return { embeds: [embed], components };
+  }
+
+  return { embeds: [embed.setDescription('Estado desconhecido')], components };
+}
+
 async function presentRoot(interaction, prisma) {
   await ensureDeferred(interaction);
   const cfg = await getProtectionsConfig(prisma);
   const embed = buildRootEmbed(cfg);
   const components = buildRootComponents();
   await respond(interaction, { embeds: [embed], components });
+  return true;
+}
+
+async function presentBackup(interaction, prisma, data) {
+  await ensureDeferred(interaction);
+  const session = setBackupSession(interaction, data || {});
+  const payload = await buildBackupPayload(interaction, prisma, session);
+  await respond(interaction, payload);
   return true;
 }
 
@@ -459,7 +789,230 @@ async function updateConfig(prisma, updater) {
   return next;
 }
 
+async function handleBackupInteraction(interaction, prisma) {
+  const cid = interaction.customId || '';
+  const isBackupAction = cid.startsWith('prot:backup:');
+  const isBackupModal = cid.startsWith('protmodal:backup:');
+  if (!isBackupAction && !isBackupModal) return false;
+
+  const messageId = interaction.message?.id || '0';
+
+  if (isBackupModal && interaction.isModalSubmit()) {
+    const parts = cid.split(':');
+    const modalType = parts[2];
+    const sourceMessageId = parts[3];
+    if (modalType === 'name') {
+      const name = interaction.fields.getTextInputValue('name') || '';
+      const session = setBackupSession(interaction, { state: BACKUP_STATES.CREATE_NAME, name });
+      const payload = await buildBackupPayload(interaction, prisma, session);
+      const message = sourceMessageId && interaction.channel?.messages
+        ? await interaction.channel.messages.fetch(sourceMessageId).catch(() => null)
+        : null;
+      if (message) {
+        await message.edit(payload).catch(() => {});
+      } else {
+        await respond(interaction, payload);
+      }
+      // reconhecer sem criar novo embed
+      if (!interaction.deferred && !interaction.replied) {
+        await interaction.deferReply({ ephemeral: true }).catch(() => {});
+        await interaction.deleteReply().catch(() => {});
+      }
+      return true;
+    }
+    return false;
+  }
+
+  if (!interaction.isButton() && !interaction.isAnySelectMenu()) return false;
+
+  const parts = cid.split(':'); // prot:backup:<action>[:extra]
+  const action = parts[2];
+  const extra = parts.slice(3).join(':');
+  const session = getBackupSession(interaction);
+
+  const go = (data) => presentBackup(interaction, prisma, data);
+
+  const runRestore = async (backupId, scopes, backup) => {
+    const totalSteps = scopes.length || 1;
+    const scopeLabel = (scope) => (scope === BACKUP_SCOPES.ROLES ? 'Cargos' : scope === BACKUP_SCOPES.CHANNELS ? 'Canais/Categorias' : scope || '—');
+    const updateUI = async (stage, scope, message) => {
+      const percent = Math.round((stage / Math.max(totalSteps, 1)) * 100);
+      await presentBackup(interaction, prisma, {
+        state: BACKUP_STATES.RESTORING,
+        restoreScopes: scopes,
+        lastBackup: backup,
+        restoreStatus: {
+          stage,
+          total: totalSteps,
+          label: scope ? scopeLabel(scope) : undefined,
+          percent,
+          message,
+        },
+      });
+    };
+
+    console.log('[backup] restore start', { guild: interaction.guild.id, backupId, scopes });
+    await updateUI(0, scopes[0], 'Preparando restauração...');
+
+    let result = { channels: { created: 0, updated: 0 }, roles: { created: 0, updated: 0 } };
+
+    if (scopes.includes(BACKUP_SCOPES.ROLES)) {
+      await updateUI(0, BACKUP_SCOPES.ROLES, 'Restaurando cargos...');
+      const resRoles = await restoreBackup(prisma, interaction.guild, backupId, [BACKUP_SCOPES.ROLES]).catch((e) => {
+        console.error('[backup] restore failed roles', e);
+        return null;
+      });
+      if (!resRoles) return null;
+      result.roles = resRoles.result?.roles || result.roles;
+      await updateUI(totalSteps === 1 ? totalSteps : 1, BACKUP_SCOPES.ROLES, 'Cargos restaurados.');
+      backup = resRoles.backup || backup;
+    }
+
+    if (scopes.includes(BACKUP_SCOPES.CHANNELS)) {
+      const stageIdx = scopes.includes(BACKUP_SCOPES.ROLES) ? 1 : 0;
+      await updateUI(stageIdx, BACKUP_SCOPES.CHANNELS, 'Restaurando canais/categorias...');
+      const resChannels = await restoreBackup(prisma, interaction.guild, backupId, [BACKUP_SCOPES.CHANNELS]).catch((e) => {
+        console.error('[backup] restore failed channels', e);
+        return null;
+      });
+      if (!resChannels) return null;
+      result.channels = resChannels.result?.channels || result.channels;
+      await updateUI(totalSteps, BACKUP_SCOPES.CHANNELS, 'Canais/categorias restaurados.');
+      backup = resChannels.backup || backup;
+    }
+
+    console.log('[backup] restore done', { backupId, scopes, result });
+    return { backup, result };
+  };
+
+  // Navegação básica
+  if (action === 'home') {
+    clearBackupSession(interaction);
+    return go({ state: BACKUP_STATES.HOME, mode: 'home', page: 0 });
+  }
+  if (action === 'cancel') {
+    return go({ state: BACKUP_STATES.CANCELLED });
+  }
+
+  if (action === 'start') {
+    if (extra === 'create') return go({ state: BACKUP_STATES.CREATE_SCOPE, mode: 'create' });
+    if (extra === 'verify') return go({ state: BACKUP_STATES.SELECT_BACKUP, mode: 'verify', page: 0, selectedBackupId: null });
+    if (extra === 'restore') return go({ state: BACKUP_STATES.SELECT_BACKUP, mode: 'restore', page: 0, selectedBackupId: null });
+  }
+
+  if (action === 'scope' && interaction.isStringSelectMenu()) {
+    const scopes = interaction.values || DEFAULT_BACKUP_SCOPES;
+    return go({ state: BACKUP_STATES.CREATE_SCOPE, scopes });
+  }
+
+  if (action === 'next' && extra === 'naming') {
+    return go({ state: BACKUP_STATES.CREATE_NAME });
+  }
+
+  if (action === 'back' && extra === 'scope') {
+    return go({ state: BACKUP_STATES.CREATE_SCOPE });
+  }
+
+  if (action === 'modal' && extra === 'name') {
+    const modal = new ModalBuilder()
+      .setCustomId(MODALS.BACKUP_NAME(messageId))
+      .setTitle('Nome do Backup')
+      .addComponents(new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('name').setLabel('Nome (opcional)').setStyle(TextInputStyle.Short).setRequired(false).setValue(session.name || ''),
+      ));
+    await interaction.showModal(modal);
+    return true;
+  }
+
+  await ensureDeferred(interaction);
+
+  if (action === 'create') {
+    await go({ state: BACKUP_STATES.CREATING });
+    const backup = await createBackup(prisma, interaction.guild, interaction.user.id, {
+      name: session.name,
+      scopes: session.scopes || DEFAULT_BACKUP_SCOPES,
+    }).catch(() => null);
+    if (!backup) {
+      await interaction.followUp({ content: 'Falha ao criar backup.', ephemeral: true }).catch(() => {});
+      return go({ state: BACKUP_STATES.CANCELLED });
+    }
+    return go({ state: BACKUP_STATES.DONE_CREATE, lastBackup: backup, mode: 'home' });
+  }
+
+  if (action === 'page') {
+    const page = parseInt(extra, 10) || 0;
+    return go({ state: BACKUP_STATES.SELECT_BACKUP, page });
+  }
+
+  if (action === 'select' && interaction.isStringSelectMenu()) {
+    const backupId = interaction.values?.[0];
+    if (!backupId) return go({ state: BACKUP_STATES.SELECT_BACKUP });
+    if (session.mode === 'verify') {
+      await go({ state: BACKUP_STATES.VERIFYING, selectedBackupId: backupId });
+      const diff = await diffBackup(prisma, interaction.guild, backupId).catch(() => null);
+      if (!diff) {
+        await interaction.followUp({ content: 'Falha ao verificar backup.', ephemeral: true }).catch(() => {});
+        return go({ state: BACKUP_STATES.CANCELLED });
+      }
+      return go({ state: BACKUP_STATES.SHOW_DIFF, diff: diff.diff, selectedBackupId: backupId, lastBackup: diff.backup });
+    }
+    // restore flow
+    const backup = await getBackup(prisma, backupId, interaction.guild.id).catch(() => null);
+    if (!backup) {
+      await interaction.followUp({ content: 'Backup não encontrado.', ephemeral: true }).catch(() => {});
+      return go({ state: BACKUP_STATES.SELECT_BACKUP });
+    }
+    return go({ state: BACKUP_STATES.CONFIRM_RESTORE, selectedBackupId: backupId, lastBackup: backup });
+  }
+
+  if (action === 'restore' && extra === 'fromdiff') {
+    if (!session.selectedBackupId) return go({ state: BACKUP_STATES.SELECT_BACKUP, mode: 'restore' });
+    return go({ state: BACKUP_STATES.CONFIRM_RESTORE, mode: 'restore' });
+  }
+
+  if (action === 'confirm') {
+    const backupId = session.selectedBackupId;
+    if (!backupId) return go({ state: BACKUP_STATES.SELECT_BACKUP, mode: 'restore' });
+    const backup = session.lastBackup || (await getBackup(prisma, backupId, interaction.guild.id).catch(() => null));
+    const scopes = backup?.scopes || DEFAULT_BACKUP_SCOPES;
+    if (scopes.length > 1) {
+      return go({ state: BACKUP_STATES.SELECT_RESTORE_SCOPE, restoreScopes: scopes, lastBackup: backup });
+    }
+    await go({ state: BACKUP_STATES.RESTORING, restoreScopes: scopes, lastBackup: backup });
+    const res = await runRestore(backupId, scopes, backup);
+    if (!res) {
+      await interaction.followUp({ content: 'Falha ao restaurar backup.', ephemeral: true }).catch(() => {});
+      return go({ state: BACKUP_STATES.CANCELLED });
+    }
+    return go({ state: BACKUP_STATES.DONE_RESTORE, restoreResult: res.result, lastBackup: res.backup, restoreScopes: scopes });
+  }
+
+  if (action === 'restore' && extra === 'scope' && interaction.isStringSelectMenu()) {
+    const scopes = interaction.values || DEFAULT_BACKUP_SCOPES;
+    return go({ state: BACKUP_STATES.SELECT_RESTORE_SCOPE, restoreScopes: scopes });
+  }
+
+  if (action === 'do_restore') {
+    const backupId = session.selectedBackupId || session.lastBackup?.backupId;
+    if (!backupId) return go({ state: BACKUP_STATES.SELECT_BACKUP, mode: 'restore' });
+    const scopes = session.restoreScopes || session.lastBackup?.scopes || DEFAULT_BACKUP_SCOPES;
+    const backup = session.lastBackup || (await getBackup(prisma, backupId, interaction.guild.id).catch(() => null));
+    await go({ state: BACKUP_STATES.RESTORING, restoreScopes: scopes, lastBackup: backup });
+    const res = await runRestore(backupId, scopes, backup);
+    if (!res) {
+      await interaction.followUp({ content: 'Falha ao restaurar backup.', ephemeral: true }).catch(() => {});
+      return go({ state: BACKUP_STATES.CANCELLED });
+    }
+    return go({ state: BACKUP_STATES.DONE_RESTORE, restoreResult: res.result, lastBackup: res.backup, restoreScopes: scopes });
+  }
+
+  return false;
+}
+
 async function handleButton(interaction, prisma) {
+  if ((interaction.customId || '').startsWith('prot:backup:')) {
+    return handleBackupInteraction(interaction, prisma);
+  }
   const parts = (interaction.customId || '').split(':');
   const [prefix, action, moduleId] = parts;
   if (prefix !== 'prot') return false;
@@ -567,7 +1120,14 @@ async function handleSelect(interaction, prisma) {
   if (interaction.customId === CUSTOM_IDS.MODULE_SELECT) {
     await ensureDeferred(interaction);
     const choice = interaction.values?.[0];
+    if (choice === 'backups') {
+      clearBackupSession(interaction);
+      return presentBackup(interaction, prisma, { state: BACKUP_STATES.HOME, mode: 'home', page: 0 });
+    }
     return presentModule(interaction, prisma, choice);
+  }
+  if (interaction.customId?.startsWith('prot:backup:')) {
+    return handleBackupInteraction(interaction, prisma);
   }
   if (interaction.customId === CUSTOM_IDS.GLOBAL_WH_USERS && interaction.isUserSelectMenu()) {
     await ensureDeferred(interaction);
@@ -656,6 +1216,9 @@ function splitIds(text) {
 }
 
 async function handleModal(interaction, prisma) {
+  if ((interaction.customId || '').startsWith('protmodal:backup:')) {
+    return handleBackupInteraction(interaction, prisma);
+  }
   const [prefix, action, moduleId, messageId] = (interaction.customId || '').split(':');
   if (prefix !== 'protmodal') return false;
   await ensureDeferred(interaction);
@@ -713,6 +1276,9 @@ async function presentMenu(interaction, ctx) {
 
 async function handleInteraction(interaction, ctx) {
   const prisma = ctx.getPrisma();
+  if ((interaction.customId || '').startsWith('prot:backup:') || (interaction.customId || '').startsWith('protmodal:backup:')) {
+    return handleBackupInteraction(interaction, prisma);
+  }
   if (interaction.isStringSelectMenu()) {
     if (interaction.customId === CUSTOM_IDS.MODULE_SELECT) return handleSelect(interaction, prisma);
     if (interaction.customId === CUSTOM_IDS.ROOT) return presentRoot(interaction, prisma);
