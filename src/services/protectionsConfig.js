@@ -99,6 +99,14 @@ function defaultConfig() {
       punishment: PUNISH.STRIP_ROLES,
       logChannelId: null,
     },
+    voiceRestrictions: {
+      enabled: false,
+      monitoredCategories: [],
+      monitoredChannels: [],
+      commandLogChannelId: null,
+      actionLogChannelId: null,
+      restrictions: [], // { a, b, reason, createdBy, createdAt, removedBy?, removedAt?, removeReason? }
+    },
   };
 }
 
@@ -151,6 +159,15 @@ function mergeConfig(raw) {
       ...base.massMuteDeafen,
       ...raw?.massMuteDeafen,
       limit: { ...base.massMuteDeafen.limit, ...(raw?.massMuteDeafen?.limit || {}) },
+    },
+    voiceRestrictions: {
+      ...base.voiceRestrictions,
+      ...raw?.voiceRestrictions,
+      monitoredCategories: raw?.voiceRestrictions?.monitoredCategories || base.voiceRestrictions.monitoredCategories,
+      monitoredChannels: raw?.voiceRestrictions?.monitoredChannels || base.voiceRestrictions.monitoredChannels,
+      restrictions: raw?.voiceRestrictions?.restrictions || base.voiceRestrictions.restrictions,
+      commandLogChannelId: raw?.voiceRestrictions?.commandLogChannelId || base.voiceRestrictions.commandLogChannelId,
+      actionLogChannelId: raw?.voiceRestrictions?.actionLogChannelId || base.voiceRestrictions.actionLogChannelId,
     },
   };
 }

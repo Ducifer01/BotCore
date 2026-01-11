@@ -23,16 +23,21 @@ function buildRootSelect() {
       { label: 'Configurar Auditoria', value: 'audit', description: 'Configure logs de auditoria' },
       { label: 'Configurar Pontos', value: 'points', description: 'Sistema de pontos (chat/call/convites)' },
       { label: 'Configurar Proteções e Snapshots', value: 'protections', description: 'Proteções de canais (snapshots)' },
+  { label: 'Configurar Restrições de Voz', value: 'voicerestrictions', description: 'Monitorar chamadas e bloquear pares de usuários' },
     ]);
 }
 
-function createMenuHandler({ insta, mute, support, automod, moderation, invites, cleaner, permissions, audit, points, protections }) {
+function createMenuHandler({ insta, mute, support, automod, moderation, invites, cleaner, permissions, audit, points, protections, voicerestrictions }) {
   async function handleInteraction(interaction, ctx) {
     if (interaction.isStringSelectMenu() && interaction.customId === 'menu:root') {
       return handleRootSelection(interaction, ctx);
     }
     if (interaction.isButton() && interaction.customId === 'menu:back') {
       return handleBack(interaction);
+    }
+    if (typeof voicerestrictions?.handleInteraction === 'function') {
+      const handled = await voicerestrictions.handleInteraction(interaction, ctx);
+      if (handled) return true;
     }
     if (typeof protections?.handleInteraction === 'function') {
       const handled = await protections.handleInteraction(interaction, ctx);
@@ -81,6 +86,9 @@ function createMenuHandler({ insta, mute, support, automod, moderation, invites,
     }
     if (choice === 'protections') {
       return protections.presentMenu(interaction, ctx);
+    }
+    if (choice === 'voicerestrictions') {
+      return voicerestrictions.presentMenu(interaction, ctx);
     }
     return false;
   }

@@ -31,6 +31,8 @@ const pointsConfigFeature = require('./features/pointsConfig');
 const blacklistFeature = require('./features/blacklist');
 const protectionsFeature = require('./features/protections');
 const { createRuntime: createProtectionsRuntime } = require('./features/protectionsRuntime');
+const voiceRestrictionsConfig = require('./features/voiceRestrictionsConfig');
+const voiceRestrictionsRuntime = require('./features/voiceRestrictionsRuntime');
 const permissionsManager = require('./features/permissionsManager');
 const { ALLOWED_GUILD_IDS, isGuildAllowed } = require('./config');
 const { DISABLED_COMMAND_FILES } = require('./constants/disabledCommands');
@@ -96,6 +98,12 @@ try {
   console.warn('[init] Protections runtime não carregado:', e?.message || e);
 }
 
+try {
+  voiceRestrictionsRuntime.register(client);
+} catch (e) {
+  console.warn('[init] Voice restrictions runtime não carregado:', e?.message || e);
+}
+
 const menuHandler = createMenuHandler({
   insta: { presentMenu: instaFeature.presentMenu },
   mute: { presentMenu: muteConfig.presentMenu },
@@ -108,6 +116,10 @@ const menuHandler = createMenuHandler({
   audit: { presentMenu: auditConfig.presentMenu },
   points: { presentMenu: pointsConfigFeature.presentMenu },
   protections: { presentMenu: protectionsFeature.presentMenu },
+  voicerestrictions: {
+    presentMenu: voiceRestrictionsConfig.presentMenu,
+    handleInteraction: voiceRestrictionsConfig.handleInteraction,
+  },
 });
 
 const interactionFeatures = [
@@ -129,6 +141,7 @@ const interactionFeatures = [
   pointsInteractions,
   pointsConfigFeature,
   protectionsFeature,
+  voiceRestrictionsConfig,
   permissionsManager,
   { handleInteraction: handleSupportInteraction },
 ];
