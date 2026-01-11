@@ -56,6 +56,23 @@ const MODULES = [
   { id: 'massMuteDeafen', label: 'Proteção mute/deafen massivo', hasLog: true, hasWhitelist: true, hasPunish: true, hasLimit: true },
 ];
 
+const CRITICAL_PERM_LABELS = {
+  Administrator: 'Administrador',
+  ManageGuild: 'Gerenciar servidor',
+  ManageRoles: 'Gerenciar cargos',
+  ManageChannels: 'Gerenciar canais',
+  ViewAuditLog: 'Ver registro de auditoria',
+  ViewGuildInsights: 'Ver insights do servidor',
+  ManageWebhooks: 'Gerenciar webhooks',
+  BanMembers: 'Banir membros',
+  ModerateMembers: 'Timeout/Moderar membros',
+  MuteMembers: 'Silenciar membros',
+  DeafenMembers: 'Ensurdecer membros',
+  MoveMembers: 'Mover membros',
+};
+
+const criticalPermLabel = (perm) => CRITICAL_PERM_LABELS[perm] || perm;
+
 function isComponent(i) {
   return i.isButton?.() || i.isAnySelectMenu?.();
 }
@@ -251,7 +268,7 @@ function buildModuleComponents(module, cfg, opts = {}) {
     const permButtons = permsPage.map((perm) =>
       new ButtonBuilder()
         .setCustomId(CUSTOM_IDS.BLOCK_PERM_TOGGLE(module.id, perm, currentPage))
-        .setLabel(perm)
+        .setLabel(criticalPermLabel(perm))
         .setStyle(activeSet.has(perm) ? ButtonStyle.Success : ButtonStyle.Danger),
     );
 
@@ -390,6 +407,10 @@ async function handleButton(interaction, prisma) {
   if (!module) return false;
   if (module.disabled) return presentRoot(interaction, prisma);
 
+  // Carrega estado atual para pré-preencher modais/valores padrão
+  const cfgCurrent = await getProtectionsConfig(prisma);
+  const moduleState = cfgCurrent[moduleId] || {};
+
   const modalActions = ['limit', 'wh', 'mindays'];
   if (!modalActions.includes(action)) {
     await ensureDeferred(interaction);
@@ -409,12 +430,24 @@ async function handleButton(interaction, prisma) {
   }
   if (action === 'limit') {
     const messageId = interaction.message?.id || '0';
+    const currentCount = moduleState?.limit?.count;
+    const currentSeconds = moduleState?.limit?.seconds;
     const modal = new ModalBuilder()
       .setCustomId(MODALS.LIMIT(moduleId, messageId))
       .setTitle('Limite X em Y segundos')
       .addComponents(
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('count').setLabel('Qtd (X)').setStyle(TextInputStyle.Short).setRequired(true)),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('seconds').setLabel('Janela em segundos (Y)').setStyle(TextInputStyle.Short).setRequired(true)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder()
+          .setCustomId('count')
+          .setLabel('Qtd (X)')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setValue(currentCount != null ? String(currentCount) : '')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder()
+          .setCustomId('seconds')
+          .setLabel('Janela em segundos (Y)')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setValue(currentSeconds != null ? String(currentSeconds) : '')),
       );
     await interaction.showModal(modal);
     return true;
@@ -425,10 +458,16 @@ async function handleButton(interaction, prisma) {
   // bloqueio de perms agora é via botões toggle
   if (action === 'mindays') {
     const messageId = interaction.message?.id || '0';
+    const currentDays = moduleState?.minAccountDays;
     const modal = new ModalBuilder()
       .setCustomId(MODALS.MIN_DAYS(moduleId, messageId))
       .setTitle('Idade mínima (dias)')
-      .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('days').setLabel('Dias').setStyle(TextInputStyle.Short).setRequired(true)));
+      .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder()
+        .setCustomId('days')
+        .setLabel('Dias')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setValue(currentDays != null ? String(currentDays) : '')));
     await interaction.showModal(modal);
     return true;
   }

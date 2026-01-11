@@ -67,13 +67,15 @@ async function fetchAuditExecutor(guild, type, targetId) {
   }
 }
 
+const hasFlag = (permField, flag) => permField.has(PermissionsBitField.Flags[flag] || flag, false);
+
 function hasCriticalPermsDiff(oldRole, newRole, blockedPerms) {
   const added = new PermissionsBitField(newRole.permissions).remove(oldRole.permissions);
-  return blockedPerms.some((p) => added.has(PermissionsBitField.Flags[p] || p));
+  return blockedPerms.some((p) => hasFlag(added, p));
 }
 
 function roleHasAny(role, permNames) {
-  return permNames.some((p) => role.permissions.has(PermissionsBitField.Flags[p] || p));
+  return permNames.some((p) => hasFlag(role.permissions, p));
 }
 
 function buildBaseEmbed(title, executor, target, description) {
@@ -95,9 +97,9 @@ function buildViolationText(violations = []) {
 
 function describePermDiff(oldRole, newRole, blockedPerms) {
   const added = new PermissionsBitField(newRole.permissions).remove(oldRole.permissions);
-  const names = blockedPerms.filter((p) => added.has(PermissionsBitField.Flags[p] || p));
+  const names = blockedPerms.filter((p) => hasFlag(added, p));
   const removed = new PermissionsBitField(oldRole.permissions).remove(newRole.permissions);
-  const removedNames = blockedPerms.filter((p) => removed.has(PermissionsBitField.Flags[p] || p));
+  const removedNames = blockedPerms.filter((p) => hasFlag(removed, p));
   if (names.length && removedNames.length) {
     return `Tentou conceder: ${names.join(', ')} | Tentou remover: ${removedNames.join(', ')}`;
   }
