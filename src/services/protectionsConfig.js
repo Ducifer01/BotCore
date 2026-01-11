@@ -22,6 +22,8 @@ const DEFAULT_CRITICAL_PERMS = [
 
 function defaultConfig() {
   return {
+    globalWhitelistUsers: [],
+    globalWhitelistRoles: [],
     antiRoleHierarchy: {
       enabled: false,
       punishment: PUNISH.STRIP_ROLES,
@@ -105,6 +107,8 @@ function mergeConfig(raw) {
   return {
     ...base,
     ...raw,
+    globalWhitelistUsers: raw?.globalWhitelistUsers || base.globalWhitelistUsers,
+    globalWhitelistRoles: raw?.globalWhitelistRoles || base.globalWhitelistRoles,
     antiRoleHierarchy: { ...base.antiRoleHierarchy, ...raw?.antiRoleHierarchy },
     antiBotAdd: { ...base.antiBotAdd, ...raw?.antiBotAdd },
     antiCriticalPerms: {

@@ -18,6 +18,9 @@ const { getProtectionsConfig, saveProtectionsConfig, PUNISH, DEFAULT_CRITICAL_PE
 const CUSTOM_IDS = {
   ROOT: 'menu:protections:root',
   MODULE_SELECT: 'menu:protections:select',
+  GLOBAL_WH: 'menu:protections:globalwh',
+  GLOBAL_WH_USERS: 'menu:protections:globalwhusers',
+  GLOBAL_WH_ROLES: 'menu:protections:globalwhroles',
   TOGGLE: (m) => `prot:toggle:${m}`,
   PUNISH: (m) => `prot:punish:${m}`,
   LIMIT: (m) => `prot:limit:${m}`,
@@ -126,6 +129,13 @@ function buildRootEmbed(cfg) {
     .setTitle('Proteções e Snapshots')
     .setDescription('Selecione uma proteção para configurar. Todos os módulos iniciam desativados.')
     .addFields(
+      {
+        name: 'Whitelist global',
+        value: `${cfg?.globalWhitelistUsers?.length || 0} usuários / ${cfg?.globalWhitelistRoles?.length || 0} cargos`,
+        inline: true,
+      },
+    )
+    .addFields(
       MODULES.filter((m) => !m.disabled).map((m) => ({
         name: m.label,
         value: cfg?.[m.id]?.enabled ? 'Ativado' : 'Desativado',
@@ -149,7 +159,10 @@ function buildRootComponents(selected) {
       })),
     );
   const row = new ActionRowBuilder().addComponents(select);
-  const back = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('menu:back').setLabel('Voltar').setStyle(ButtonStyle.Secondary));
+  const back = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('menu:back').setLabel('Voltar').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(CUSTOM_IDS.GLOBAL_WH).setLabel('Whitelist global').setStyle(ButtonStyle.Secondary),
+  );
   return [row, back];
 }
 
@@ -346,11 +359,58 @@ function buildWhitelistComponents(module, cfg) {
   return rows;
 }
 
+function buildGlobalWhitelistComponents(cfg) {
+  const defaultUsers = Array.isArray(cfg.globalWhitelistUsers) ? cfg.globalWhitelistUsers.slice(0, 25) : [];
+  const defaultRoles = Array.isArray(cfg.globalWhitelistRoles) ? cfg.globalWhitelistRoles.slice(0, 25) : [];
+  const rows = [];
+
+  rows.push(new ActionRowBuilder().addComponents(
+    new UserSelectMenuBuilder()
+      .setCustomId(CUSTOM_IDS.GLOBAL_WH_USERS)
+      .setPlaceholder('Selecionar usuários em whitelist global')
+      .setDefaultUsers(defaultUsers)
+      .setMinValues(0)
+      .setMaxValues(25),
+  ));
+
+  rows.push(new ActionRowBuilder().addComponents(
+    new RoleSelectMenuBuilder()
+      .setCustomId(CUSTOM_IDS.GLOBAL_WH_ROLES)
+      .setPlaceholder('Selecionar cargos em whitelist global')
+      .setDefaultRoles(defaultRoles)
+      .setMinValues(0)
+      .setMaxValues(25),
+  ));
+
+  rows.push(new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(CUSTOM_IDS.ROOT).setLabel('Voltar menu').setStyle(ButtonStyle.Secondary),
+  ));
+  return rows;
+}
+
 async function presentRoot(interaction, prisma) {
   await ensureDeferred(interaction);
   const cfg = await getProtectionsConfig(prisma);
   const embed = buildRootEmbed(cfg);
   const components = buildRootComponents();
+  await respond(interaction, { embeds: [embed], components });
+  return true;
+}
+
+async function presentGlobalWhitelist(interaction, prisma) {
+  await ensureDeferred(interaction);
+  const cfg = await getProtectionsConfig(prisma);
+  const desc = [
+    'Whitelist global válida para todos os módulos.',
+    '',
+    `Usuários atuais: ${cfg.globalWhitelistUsers?.length ? cfg.globalWhitelistUsers.map((id) => `<@${id}>`).join(', ') : '—'}`,
+    `Cargos atuais: ${cfg.globalWhitelistRoles?.length ? cfg.globalWhitelistRoles.map((id) => `<@&${id}>`).join(', ') : '—'}`,
+  ].join('\n');
+  const embed = new EmbedBuilder()
+    .setTitle('Whitelist Global')
+    .setDescription(desc)
+    .setColor(0x5865f2);
+  const components = buildGlobalWhitelistComponents(cfg);
   await respond(interaction, { embeds: [embed], components });
   return true;
 }
@@ -509,6 +569,24 @@ async function handleSelect(interaction, prisma) {
     const choice = interaction.values?.[0];
     return presentModule(interaction, prisma, choice);
   }
+  if (interaction.customId === CUSTOM_IDS.GLOBAL_WH_USERS && interaction.isUserSelectMenu()) {
+    await ensureDeferred(interaction);
+    const userIds = interaction.values || [];
+    await updateConfig(prisma, (cfg) => {
+      cfg.globalWhitelistUsers = userIds;
+      return cfg;
+    });
+    return presentGlobalWhitelist(interaction, prisma);
+  }
+  if (interaction.customId === CUSTOM_IDS.GLOBAL_WH_ROLES && interaction.isRoleSelectMenu()) {
+    await ensureDeferred(interaction);
+    const roleIds = interaction.values || [];
+    await updateConfig(prisma, (cfg) => {
+      cfg.globalWhitelistRoles = roleIds;
+      return cfg;
+    });
+    return presentGlobalWhitelist(interaction, prisma);
+  }
   const [prefix, action, moduleId] = (interaction.customId || '').split(':');
   if (prefix !== 'prot') return false;
   await ensureDeferred(interaction);
@@ -641,6 +719,7 @@ async function handleInteraction(interaction, ctx) {
   }
   if (interaction.isButton()) {
     if (interaction.customId === CUSTOM_IDS.ROOT) return presentRoot(interaction, prisma);
+    if (interaction.customId === CUSTOM_IDS.GLOBAL_WH) return presentGlobalWhitelist(interaction, prisma);
     if (interaction.customId.startsWith('prot:back:')) {
       const moduleId = interaction.customId.split(':')[2];
       return presentModule(interaction, prisma, moduleId);

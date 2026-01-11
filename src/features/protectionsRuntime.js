@@ -17,14 +17,16 @@ class Counter {
   }
 }
 
-function isWhitelisted(userId, member, whitelistUsers = [], whitelistRoles = []) {
+function isWhitelisted(userId, member, whitelistUsers = [], whitelistRoles = [], globalUsers = [], globalRoles = []) {
   if (!userId) return false;
   const botId = member?.guild?.members?.me?.id || member?.client?.user?.id;
   if (botId && userId === botId) return true;
   if (whitelistUsers.includes(userId)) return true;
+  if (globalUsers.includes(userId)) return true;
   if (member) {
     const roles = member.roles?.cache || new Map();
     if (roles.some((r) => whitelistRoles.includes(r.id))) return true;
+    if (roles.some((r) => globalRoles.includes(r.id))) return true;
   }
   return false;
 }
@@ -175,8 +177,22 @@ function createRuntime() {
     if (executor?.id === guild.members.me?.id) return;
 
     // If whitelisted for both modules, skip
-    const whitelistedHierarchy = shouldCheckHierarchy && isWhitelisted(executor?.id, executorMember, cfg.antiRoleHierarchy.whitelistUsers, cfg.antiRoleHierarchy.whitelistRoles);
-    const whitelistedPerms = shouldCheckPerms && isWhitelisted(executor?.id, executorMember, cfg.antiCriticalPerms.whitelistUsers, cfg.antiCriticalPerms.whitelistRoles);
+    const whitelistedHierarchy = shouldCheckHierarchy && isWhitelisted(
+      executor?.id,
+      executorMember,
+      cfg.antiRoleHierarchy.whitelistUsers,
+      cfg.antiRoleHierarchy.whitelistRoles,
+      cfg.globalWhitelistUsers,
+      cfg.globalWhitelistRoles,
+    );
+    const whitelistedPerms = shouldCheckPerms && isWhitelisted(
+      executor?.id,
+      executorMember,
+      cfg.antiCriticalPerms.whitelistUsers,
+      cfg.antiCriticalPerms.whitelistRoles,
+      cfg.globalWhitelistUsers,
+      cfg.globalWhitelistRoles,
+    );
 
     const violations = [];
     let rollbackPerms = false;
@@ -273,7 +289,14 @@ function createRuntime() {
     const guild = channel.guild;
     const executor = await fetchAuditExecutor(guild, AuditLogEvent.ChannelDelete, channel.id);
     const member = executor ? await guild.members.fetch(executor.id).catch(() => null) : null;
-    const whitelisted = isWhitelisted(executor?.id, member, cfg.massChannelDelete.whitelistUsers || [], cfg.massChannelDelete.whitelistRoles || []);
+    const whitelisted = isWhitelisted(
+      executor?.id,
+      member,
+      cfg.massChannelDelete.whitelistUsers || [],
+      cfg.massChannelDelete.whitelistRoles || [],
+      cfg.globalWhitelistUsers,
+      cfg.globalWhitelistRoles,
+    );
     if (whitelisted) return;
     const limit = cfg.massChannelDelete.limit;
     const count = limiter.channelDelete.hit(`${executor?.id || 'unknown'}`, limit.seconds);
@@ -291,7 +314,14 @@ function createRuntime() {
     const guild = member.guild;
     const executor = await fetchAuditExecutor(guild, AuditLogEvent.BotAdd, member.id);
     const executorMember = executor ? await guild.members.fetch(executor.id).catch(() => null) : null;
-    const whitelisted = isWhitelisted(executor?.id, executorMember, cfg.antiBotAdd.whitelistUsers, cfg.antiBotAdd.whitelistRoles);
+    const whitelisted = isWhitelisted(
+      executor?.id,
+      executorMember,
+      cfg.antiBotAdd.whitelistUsers,
+      cfg.antiBotAdd.whitelistRoles,
+      cfg.globalWhitelistUsers,
+      cfg.globalWhitelistRoles,
+    );
     if (!whitelisted) {
       if (cfg.antiBotAdd.botAction === 'BAN') {
         await guild.members.ban(member.id, { reason: 'Proteção: bot não autorizado' }).catch(() => member.kick('Proteção: bot não autorizado').catch(() => {}));
@@ -321,7 +351,14 @@ function createRuntime() {
     const guild = ban.guild;
     const executor = await fetchAuditExecutor(guild, AuditLogEvent.MemberBanAdd, ban.user.id);
     const member = executor ? await guild.members.fetch(executor.id).catch(() => null) : null;
-    const whitelisted = isWhitelisted(executor?.id, member, cfg.massBanKick.whitelistUsers || [], cfg.massBanKick.whitelistRoles || []);
+    const whitelisted = isWhitelisted(
+      executor?.id,
+      member,
+      cfg.massBanKick.whitelistUsers || [],
+      cfg.massBanKick.whitelistRoles || [],
+      cfg.globalWhitelistUsers,
+      cfg.globalWhitelistRoles,
+    );
     if (whitelisted) return;
     const limit = cfg.massBanKick.limit;
     const count = limiter.ban.hit(`${executor?.id || 'unknown'}`, limit.seconds);
@@ -340,7 +377,14 @@ function createRuntime() {
     const guild = newMember.guild;
     const executor = await fetchAuditExecutor(guild, AuditLogEvent.MemberUpdate, newMember.id);
     const member = executor ? await guild.members.fetch(executor.id).catch(() => null) : null;
-    const whitelisted = isWhitelisted(executor?.id, member, cfg.massTimeout.whitelistUsers || [], cfg.massTimeout.whitelistRoles || []);
+    const whitelisted = isWhitelisted(
+      executor?.id,
+      member,
+      cfg.massTimeout.whitelistUsers || [],
+      cfg.massTimeout.whitelistRoles || [],
+      cfg.globalWhitelistUsers,
+      cfg.globalWhitelistRoles,
+    );
     if (whitelisted) return;
     const limit = cfg.massTimeout.limit;
     const count = limiter.timeout.hit(`${executor?.id || 'unknown'}`, limit.seconds);
@@ -367,8 +411,22 @@ function createRuntime() {
     const executor = await fetchAuditExecutor(guild, AuditLogEvent.MemberRoleUpdate, newMember.id);
     const executorMember = executor ? await guild.members.fetch(executor.id).catch(() => null) : null;
 
-    const whitelistedHierarchy = checkHierarchy && isWhitelisted(executor?.id, executorMember, cfg.antiRoleHierarchy.whitelistUsers, cfg.antiRoleHierarchy.whitelistRoles);
-    const whitelistedPerms = checkCritical && isWhitelisted(executor?.id, executorMember, cfg.antiCriticalPerms.whitelistUsers, cfg.antiCriticalPerms.whitelistRoles);
+    const whitelistedHierarchy = checkHierarchy && isWhitelisted(
+      executor?.id,
+      executorMember,
+      cfg.antiRoleHierarchy.whitelistUsers,
+      cfg.antiRoleHierarchy.whitelistRoles,
+      cfg.globalWhitelistUsers,
+      cfg.globalWhitelistRoles,
+    );
+    const whitelistedPerms = checkCritical && isWhitelisted(
+      executor?.id,
+      executorMember,
+      cfg.antiCriticalPerms.whitelistUsers,
+      cfg.antiCriticalPerms.whitelistRoles,
+      cfg.globalWhitelistUsers,
+      cfg.globalWhitelistRoles,
+    );
 
     const toRemove = [];
     const violations = [];
@@ -413,7 +471,14 @@ function createRuntime() {
     const guild = oldState.guild;
     const executor = await fetchAuditExecutor(guild, AuditLogEvent.MemberDisconnect, oldState.id);
     const member = executor ? await guild.members.fetch(executor.id).catch(() => null) : null;
-    const whitelisted = isWhitelisted(executor?.id, member, cfg.massDisconnect.whitelistUsers || [], cfg.massDisconnect.whitelistRoles || []);
+    const whitelisted = isWhitelisted(
+      executor?.id,
+      member,
+      cfg.massDisconnect.whitelistUsers || [],
+      cfg.massDisconnect.whitelistRoles || [],
+      cfg.globalWhitelistUsers,
+      cfg.globalWhitelistRoles,
+    );
     if (whitelisted) return;
     const limit = cfg.massDisconnect.limit;
     const count = limiter.disconnect.hit(`${executor?.id || 'unknown'}`, limit.seconds);
@@ -432,7 +497,14 @@ function createRuntime() {
     const guild = newState.guild;
     const executor = await fetchAuditExecutor(guild, AuditLogEvent.MemberUpdate, newState.id);
     const member = executor ? await guild.members.fetch(executor.id).catch(() => null) : null;
-    const whitelisted = isWhitelisted(executor?.id, member, cfg.massMuteDeafen.whitelistUsers || [], cfg.massMuteDeafen.whitelistRoles || []);
+    const whitelisted = isWhitelisted(
+      executor?.id,
+      member,
+      cfg.massMuteDeafen.whitelistUsers || [],
+      cfg.massMuteDeafen.whitelistRoles || [],
+      cfg.globalWhitelistUsers,
+      cfg.globalWhitelistRoles,
+    );
     if (whitelisted) return;
     const limit = cfg.massMuteDeafen.limit;
     const count = limiter.muteDeafen.hit(`${executor?.id || 'unknown'}`, limit.seconds);
