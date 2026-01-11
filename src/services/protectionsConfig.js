@@ -47,7 +47,8 @@ function defaultConfig() {
       logChannelId: null,
       whitelistUsers: [],
       whitelistRoles: [],
-      blockedPerms: DEFAULT_CRITICAL_PERMS,
+      // Por padrão nenhum bloqueio ativo; admin escolhe o que bloquear no painel.
+      blockedPerms: [],
     },
     antiAlt: {
       enabled: false,

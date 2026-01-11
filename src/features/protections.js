@@ -32,12 +32,13 @@ const CUSTOM_IDS = {
   WH_USERS: (m) => `prot:whusers:${m}`,
   WH_ROLES: (m) => `prot:whroles:${m}`,
   BACK_MODULE: (m) => `prot:back:${m}`,
+  PAGE: (m, page) => `prot:page:${m}:${page}`,
+  BLOCK_PERM_TOGGLE: (m, perm, page) => `prot:blockperm:${m}:${page}:${perm}`,
 };
 
 const MODALS = {
   LIMIT: (m, msg) => `protmodal:limit:${m}:${msg || '0'}`,
   WHITELIST: (m, msg) => `protmodal:wh:${m}:${msg || '0'}`,
-  BLOCKED_PERMS: (m, msg) => `protmodal:blockperms:${m}:${msg || '0'}`,
   MIN_DAYS: (m, msg) => `protmodal:mindays:${m}:${msg || '0'}`,
 };
 
@@ -151,7 +152,12 @@ function buildModuleEmbed(module, cfg) {
     fields.push({ name: 'Anti-set cargos', value: state.preventProtectedRoleGive ? 'Sim' : 'Não', inline: true });
   }
   if (module.id === 'antiCriticalPerms') {
-    fields.push({ name: 'Perms bloqueadas', value: state.blockedPerms?.length ? state.blockedPerms.join(', ') : '—', inline: false });
+    const active = state.blockedPerms || [];
+    fields.push({
+      name: 'Perms bloqueadas',
+      value: active.length ? `Ativas (${active.length}): ${active.join(', ')}` : 'Nenhuma (todas liberadas)',
+      inline: false,
+    });
   }
   if (module.id === 'antiAlt') {
     fields.push({ name: 'Idade mínima (dias)', value: String(state.minAccountDays || 7), inline: true });
@@ -167,7 +173,8 @@ function buildModuleEmbed(module, cfg) {
     .setColor(state.enabled ? 0x2ecc71 : 0x5865f2);
 }
 
-function buildModuleComponents(module, cfg) {
+function buildModuleComponents(module, cfg, opts = {}) {
+  const page = Math.max(0, opts.page || 0);
   const state = cfg[module.id] || {};
   const defaultLogChannel = state.logChannelId ? [state.logChannelId] : [];
   const defaultLimitRole = state.limitRoleId ? [state.limitRoleId] : [];
@@ -219,26 +226,60 @@ function buildModuleComponents(module, cfg) {
     ));
   }
 
-  if (module.hasWhitelist) {
+  if (module.hasWhitelist && module.id !== 'antiCriticalPerms') {
     const wlRowButtons = [new ButtonBuilder().setCustomId(CUSTOM_IDS.WHITELIST(module.id)).setLabel('Editar whitelist').setStyle(ButtonStyle.Secondary)];
-    if (module.id === 'antiCriticalPerms') {
-      wlRowButtons.push(new ButtonBuilder().setCustomId(CUSTOM_IDS.BLOCKED_PERMS(module.id)).setLabel('Perms bloqueadas').setStyle(ButtonStyle.Secondary));
-    }
     if (module.id === 'antiAlt') {
       wlRowButtons.push(new ButtonBuilder().setCustomId(CUSTOM_IDS.MIN_DAYS(module.id)).setLabel('Idade mínima (dias)').setStyle(ButtonStyle.Secondary));
     }
     rows.push(new ActionRowBuilder().addComponents(wlRowButtons));
-  } else {
-    if (module.id === 'antiCriticalPerms') {
-      rows.push(new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(CUSTOM_IDS.BLOCKED_PERMS(module.id)).setLabel('Perms bloqueadas').setStyle(ButtonStyle.Secondary),
-      ));
-    }
+  } else if (!module.hasWhitelist) {
     if (module.id === 'antiAlt') {
       rows.push(new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(CUSTOM_IDS.MIN_DAYS(module.id)).setLabel('Idade mínima (dias)').setStyle(ButtonStyle.Secondary),
       ));
     }
+  }
+
+  if (module.id === 'antiCriticalPerms') {
+    const activeSet = new Set(state.blockedPerms || []);
+    const buttonsPerRow = 5;
+    const perPage = 10; // 2 rows x 5 buttons to respeitar limite de 5 action rows
+    const totalPerms = (DEFAULT_CRITICAL_PERMS || []).length;
+    const maxPage = Math.max(0, Math.ceil(totalPerms / perPage) - 1);
+    const currentPage = Math.min(page, maxPage);
+    const permsPage = (DEFAULT_CRITICAL_PERMS || []).slice(currentPage * perPage, currentPage * perPage + perPage);
+    const permButtons = permsPage.map((perm) =>
+      new ButtonBuilder()
+        .setCustomId(CUSTOM_IDS.BLOCK_PERM_TOGGLE(module.id, perm, currentPage))
+        .setLabel(perm)
+        .setStyle(activeSet.has(perm) ? ButtonStyle.Success : ButtonStyle.Danger),
+    );
+
+    for (let i = 0; i < permButtons.length; i += buttonsPerRow) {
+      rows.push(new ActionRowBuilder().addComponents(permButtons.slice(i, i + buttonsPerRow)));
+    }
+
+    // Controles de paginação + navegação sem estourar o limite de 5 action rows
+    const hasPagination = maxPage > 0;
+    const navButtons = [];
+    if (hasPagination) {
+      navButtons.push(new ButtonBuilder().setCustomId(CUSTOM_IDS.PAGE(module.id, Math.max(0, currentPage - 1))).setEmoji('◀️').setStyle(ButtonStyle.Secondary).setDisabled(currentPage === 0));
+    }
+    if (module.hasWhitelist) {
+      navButtons.push(new ButtonBuilder().setCustomId(CUSTOM_IDS.WHITELIST(module.id)).setLabel('Editar whitelist').setStyle(ButtonStyle.Secondary));
+    }
+    navButtons.push(new ButtonBuilder().setCustomId(CUSTOM_IDS.BACK_MODULE(module.id)).setLabel('Voltar módulo').setStyle(ButtonStyle.Secondary));
+    if (hasPagination) {
+      navButtons.push(new ButtonBuilder().setCustomId(CUSTOM_IDS.PAGE(module.id, Math.min(maxPage, currentPage + 1))).setEmoji('▶️').setStyle(ButtonStyle.Secondary).setDisabled(currentPage >= maxPage));
+    }
+    navButtons.push(new ButtonBuilder().setCustomId(CUSTOM_IDS.ROOT).setLabel('Voltar menu').setStyle(ButtonStyle.Secondary));
+    if (hasPagination && navButtons.length < 5) {
+      navButtons.push(new ButtonBuilder().setCustomId('prot:pageinfo').setLabel(`Página ${currentPage + 1}/${maxPage + 1}`).setStyle(ButtonStyle.Secondary).setDisabled(true));
+    }
+    rows.push(new ActionRowBuilder().addComponents(navButtons.slice(0, 5)));
+
+    // Já incluímos navegação e voltar no mesmo row; evitamos adicionar outro row de voltar no final.
+    return rows;
   }
 
   if (module.id === 'blockedRoles') {
@@ -297,12 +338,12 @@ async function presentRoot(interaction, prisma) {
   return true;
 }
 
-async function presentModule(interaction, prisma, moduleId) {
+async function presentModule(interaction, prisma, moduleId, opts = {}) {
   await ensureDeferred(interaction);
   const module = moduleById(moduleId);
   if (!module || module.disabled) return presentRoot(interaction, prisma);
   const cfg = await getProtectionsConfig(prisma);
-  const payload = buildPayload(buildModuleEmbed(module, cfg), buildModuleComponents(module, cfg));
+  const payload = buildPayload(buildModuleEmbed(module, cfg), buildModuleComponents(module, cfg, opts));
   if (interaction?.isRepliable?.()) {
     await respond(interaction, payload);
   } else if (interaction?.edit) {
@@ -342,13 +383,14 @@ async function updateConfig(prisma, updater) {
 }
 
 async function handleButton(interaction, prisma) {
-  const [prefix, action, moduleId] = (interaction.customId || '').split(':');
+  const parts = (interaction.customId || '').split(':');
+  const [prefix, action, moduleId] = parts;
   if (prefix !== 'prot') return false;
   const module = moduleById(moduleId);
   if (!module) return false;
   if (module.disabled) return presentRoot(interaction, prisma);
 
-  const modalActions = ['limit', 'wh', 'blockperms', 'mindays'];
+  const modalActions = ['limit', 'wh', 'mindays'];
   if (!modalActions.includes(action)) {
     await ensureDeferred(interaction);
   }
@@ -380,17 +422,7 @@ async function handleButton(interaction, prisma) {
   if (action === 'wh') {
     return presentWhitelist(interaction, prisma, moduleId);
   }
-  if (action === 'blockperms') {
-    const messageId = interaction.message?.id || '0';
-    const modal = new ModalBuilder()
-      .setCustomId(MODALS.BLOCKED_PERMS(moduleId, messageId))
-      .setTitle('Permissões bloqueadas')
-      .addComponents(
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('perms').setLabel('Permissões (nome) separadas por vírgula').setStyle(TextInputStyle.Paragraph).setRequired(false).setValue(DEFAULT_CRITICAL_PERMS.join(', '))),
-      );
-    await interaction.showModal(modal);
-    return true;
-  }
+  // bloqueio de perms agora é via botões toggle
   if (action === 'mindays') {
     const messageId = interaction.message?.id || '0';
     const modal = new ModalBuilder()
@@ -411,6 +443,22 @@ async function handleButton(interaction, prisma) {
       cfg[moduleId].preventProtectedRoleGive = !cfg[moduleId].preventProtectedRoleGive;
       return cfg;
     });
+  }
+  if (action === 'blockperm' && parts.length >= 5) {
+    const page = parseInt(parts[3], 10) || 0;
+    const perm = parts.slice(4).join(':');
+    await updateConfig(prisma, (cfg) => {
+      const arr = new Set(cfg[moduleId].blockedPerms || []);
+      if (arr.has(perm)) arr.delete(perm); else arr.add(perm);
+      cfg[moduleId].blockedPerms = [...arr];
+      return cfg;
+    });
+    return presentModule(interaction, prisma, moduleId, { page });
+  }
+
+  if (action === 'page' && parts.length >= 4) {
+    const page = parseInt(parts[3], 10) || 0;
+    return presentModule(interaction, prisma, moduleId, { page });
   }
 
   return presentModule(interaction, prisma, moduleId);
@@ -511,13 +559,6 @@ async function handleModal(interaction, prisma) {
     await updateConfig(prisma, (cfg) => {
       cfg[moduleId].whitelistUsers = users;
       cfg[moduleId].whitelistRoles = roles;
-      return cfg;
-    });
-  }
-  if (action === 'blockperms') {
-    const perms = splitIds(interaction.fields.getTextInputValue('perms'));
-    await updateConfig(prisma, (cfg) => {
-      cfg[moduleId].blockedPerms = perms.length ? perms : DEFAULT_CRITICAL_PERMS;
       return cfg;
     });
   }
