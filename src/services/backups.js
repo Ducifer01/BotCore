@@ -3,6 +3,7 @@ const crypto = require('crypto');
 
 const BACKUP_SCOPES = {
   CHANNELS: 'channels',
+  CHANNELS_CATEGORY: 'channels_category',
   ROLES: 'roles',
 };
 
@@ -39,7 +40,7 @@ function snapshotOverwrites(channel) {
   }));
 }
 
-async function snapshotChannels(guild) {
+async function snapshotChannels(guild, { categoryId } = {}) {
   const channels = guild.channels.cache
     .filter((c) => !c.isThread())
     .map((c) => ({
@@ -55,7 +56,8 @@ async function snapshotChannels(guild) {
       userLimit: c.userLimit || null,
       overwrites: snapshotOverwrites(c),
     }));
-  return channels;
+  if (!categoryId) return channels;
+  return channels.filter((c) => c.id === categoryId || c.parentId === categoryId || (c.type === ChannelType.GuildCategory && c.id === categoryId));
 }
 
 function snapshotRoles(guild) {
@@ -72,11 +74,16 @@ function snapshotRoles(guild) {
     }));
 }
 
-async function captureSnapshot(guild, scopes) {
+async function captureSnapshot(guild, scopes, opts = {}) {
   const data = {};
   const set = new Set(scopes || []);
+  const categoryId = opts.categoryId;
   if (set.has(BACKUP_SCOPES.CHANNELS)) {
     data.channels = await snapshotChannels(guild);
+  }
+  if (set.has(BACKUP_SCOPES.CHANNELS_CATEGORY)) {
+    data.categoryId = categoryId || null;
+    data.channels = await snapshotChannels(guild, { categoryId });
   }
   if (set.has(BACKUP_SCOPES.ROLES)) {
     data.roles = snapshotRoles(guild);
@@ -84,8 +91,8 @@ async function captureSnapshot(guild, scopes) {
   return data;
 }
 
-async function createBackup(prisma, guild, userId, { name, scopes }) {
-  const payloadObj = await captureSnapshot(guild, scopes);
+async function createBackup(prisma, guild, userId, { name, scopes, categoryId }) {
+  const payloadObj = await captureSnapshot(guild, scopes, { categoryId });
   const backup = await prisma.backup.create({
     data: {
       backupId: genId(),
@@ -189,7 +196,7 @@ async function diffBackup(prisma, guild, backupId) {
   const scopes = backup.scopes || [];
   const payload = backup.payload || {};
   const result = {};
-  if (scopes.includes(BACKUP_SCOPES.CHANNELS)) {
+  if (scopes.includes(BACKUP_SCOPES.CHANNELS) || scopes.includes(BACKUP_SCOPES.CHANNELS_CATEGORY)) {
     result.channels = diffChannels(payload.channels, guild);
   }
   if (scopes.includes(BACKUP_SCOPES.ROLES)) {
@@ -326,10 +333,15 @@ async function restoreBackup(prisma, guild, backupId, scopesOverride) {
   if (scopes.includes(BACKUP_SCOPES.ROLES) && payload.roles) {
     result.roles = await restoreRoles(guild, payload.roles);
   }
-  if (scopes.includes(BACKUP_SCOPES.CHANNELS) && payload.channels) {
+  if ((scopes.includes(BACKUP_SCOPES.CHANNELS) || scopes.includes(BACKUP_SCOPES.CHANNELS_CATEGORY)) && payload.channels) {
     result.channels = await restoreChannels(guild, payload.channels);
   }
   return { backup, result };
+}
+
+async function deleteBackup(prisma, backupId, guildId) {
+  const res = await prisma.backup.deleteMany({ where: { backupId, ...(guildId ? { guildId } : {}) } });
+  return res.count > 0;
 }
 
 module.exports = {
@@ -340,4 +352,5 @@ module.exports = {
   getBackup,
   diffBackup,
   restoreBackup,
+  deleteBackup,
 };

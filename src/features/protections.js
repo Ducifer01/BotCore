@@ -14,7 +14,7 @@ const {
 } = require('discord.js');
 const { ensureGuild } = require('../permissions');
 const { getProtectionsConfig, saveProtectionsConfig, PUNISH, DEFAULT_CRITICAL_PERMS } = require('../services/protectionsConfig');
-const { BACKUP_SCOPES, createBackup, listBackups, countBackups, diffBackup, restoreBackup, getBackup } = require('../services/backups');
+const { BACKUP_SCOPES, createBackup, listBackups, countBackups, diffBackup, restoreBackup, getBackup, deleteBackup } = require('../services/backups');
 
 const CUSTOM_IDS = {
   ROOT: 'menu:protections:root',
@@ -46,6 +46,7 @@ const MODALS = {
   WHITELIST: (m, msg) => `protmodal:wh:${m}:${msg || '0'}`,
   MIN_DAYS: (m, msg) => `protmodal:mindays:${m}:${msg || '0'}`,
   BACKUP_NAME: (msg) => `protmodal:backup:name:${msg || '0'}`,
+  BACKUP_CATEGORY_FILTER: (msg) => `protmodal:backup:catfilter:${msg || '0'}`,
 };
 
 const MODULES = [
@@ -72,9 +73,12 @@ const BACKUP_STATES = {
   VERIFYING: 'VERIFYING',
   SHOW_DIFF: 'SHOW_DIFF',
   CONFIRM_RESTORE: 'CONFIRM_RESTORE',
+  SELECT_CATEGORY: 'SELECT_CATEGORY',
   SELECT_RESTORE_SCOPE: 'SELECT_RESTORE_SCOPE',
   RESTORING: 'RESTORING',
   DONE_RESTORE: 'DONE_RESTORE',
+  CONFIRM_DELETE: 'CONFIRM_DELETE',
+  DONE_DELETE: 'DONE_DELETE',
   CANCELLED: 'CANCELLED',
 };
 
@@ -446,6 +450,8 @@ function getBackupSession(interaction) {
     diff: null,
     lastBackup: null,
     restoreScopes: null,
+    categoryId: null,
+    categoryFilter: '',
   };
   const existing = backupSessions.get(backupSessionKey(interaction));
   return existing ? { ...base, ...existing } : base;
@@ -471,6 +477,7 @@ function backupScopeOptions(scopes = []) {
 function buildBackupButtonsHome() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('start', 'create')).setLabel('➕ Criar backup').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('start', 'create_category')).setLabel('📁 Backup de categoria').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('start', 'verify')).setLabel('🔍 Verificar backup').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('start', 'restore')).setLabel('♻️ Restaurar backup').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(CUSTOM_IDS.ROOT).setLabel('Voltar').setStyle(ButtonStyle.Secondary),
@@ -505,7 +512,7 @@ async function buildBackupPayload(interaction, prisma, session) {
           .setCustomId(CUSTOM_IDS.BACKUP('scope'))
           .setPlaceholder('Selecione escopos')
           .setMinValues(1)
-          .setMaxValues(2)
+          .setMaxValues(backupScopeOptions().length)
           .addOptions(backupScopeOptions(session.scopes)),
       ),
     );
@@ -538,6 +545,38 @@ async function buildBackupPayload(interaction, prisma, session) {
     return { embeds: [embed], components };
   }
 
+  if (state === BACKUP_STATES.SELECT_CATEGORY) {
+    embed
+      .setTitle('📁 Selecione a categoria')
+      .setDescription([
+        'Busque pelo nome e escolha a categoria cujos canais serão incluídos no backup.',
+        session.categoryId ? `Categoria selecionada: <#${session.categoryId}>` : 'Nenhuma selecionada',
+      ].join('\n'));
+    components.push(
+      new ActionRowBuilder().addComponents(
+        new ChannelSelectMenuBuilder()
+          .setCustomId(CUSTOM_IDS.BACKUP('select_category'))
+          .setPlaceholder('Digite para buscar a categoria')
+          .setChannelTypes(ChannelType.GuildCategory)
+          .setMinValues(1)
+          .setMaxValues(1)
+          .setDefaultChannels(session.categoryId ? [session.categoryId] : []),
+      ),
+    );
+    components.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('next:naming')).setLabel('Próximo').setStyle(ButtonStyle.Primary).setDisabled(!session.categoryId),
+      ),
+    );
+    components.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('back:scope')).setLabel('Voltar').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('cancel')).setLabel('Cancelar').setStyle(ButtonStyle.Secondary),
+      ),
+    );
+    return { embeds: [embed], components };
+  }
+
   if (state === BACKUP_STATES.CREATING) {
     embed.setTitle('⏳ Criando backup...').setDescription('Isso pode levar alguns segundos.');
     pushBackHome();
@@ -546,12 +585,15 @@ async function buildBackupPayload(interaction, prisma, session) {
 
   if (state === BACKUP_STATES.DONE_CREATE) {
     const b = session.lastBackup;
+    const categoryId = b?.payload?.categoryId;
+    const categoryName = categoryId ? (guild.channels.cache.get(categoryId)?.name || `Categoria ${categoryId}`) : null;
     embed
       .setTitle('✅ Backup criado com sucesso!')
       .setDescription([
         `ID: ${b?.backupId || '—'}`,
         `Nome: ${b?.name || '—'}`,
         `Escopos: ${(b?.scopes || []).join(', ') || '—'}`,
+        categoryId ? `Categoria: ${categoryName ? `${categoryName} (${categoryId})` : categoryId}` : null,
       ].join('\n'));
     components.push(
       new ActionRowBuilder().addComponents(
@@ -623,19 +665,26 @@ async function buildBackupPayload(interaction, prisma, session) {
       new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('start:verify')).setLabel('Voltar').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('restore:fromdiff')).setLabel('♻️ Restaurar com base neste backup').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('delete')).setLabel('Excluir backup').setStyle(ButtonStyle.Danger),
       ),
     );
     return { embeds: [embed], components };
   }
 
   if (state === BACKUP_STATES.CONFIRM_RESTORE) {
+    const categoryId = session.lastBackup?.payload?.categoryId;
+    const categoryName = categoryId ? (guild.channels.cache.get(categoryId)?.name || `Categoria ${categoryId}`) : null;
     embed
       .setTitle('⚠️ Confirmação necessária')
-      .setDescription('O bot fará alterações no servidor. Deseja continuar?');
+      .setDescription([
+        'O bot fará alterações no servidor. Deseja continuar?',
+        categoryId ? `Este backup é parcial: apenas canais da categoria ${categoryName || categoryId}.` : null,
+      ].filter(Boolean).join('\n'));
     components.push(
       new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('confirm')).setLabel('Prosseguir').setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('cancel')).setLabel('Cancelar').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('delete')).setLabel('Excluir backup').setStyle(ButtonStyle.Danger),
       ),
     );
     pushBackHome();
@@ -661,6 +710,25 @@ async function buildBackupPayload(interaction, prisma, session) {
     components.push(
       new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('do_restore')).setLabel('Restaurar').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('cancel')).setLabel('Cancelar').setStyle(ButtonStyle.Secondary),
+      ),
+    );
+    pushBackHome();
+    return { embeds: [embed], components };
+  }
+
+  if (state === BACKUP_STATES.CONFIRM_DELETE) {
+    const b = session.lastBackup;
+    embed
+      .setTitle('🗑️ Excluir backup')
+      .setDescription([
+        'Tem certeza que deseja excluir este backup?',
+        `ID: ${b?.backupId || '—'}`,
+        `Nome: ${b?.name || '—'}`,
+      ].join('\n'));
+    components.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('confirm_delete')).setLabel('Sim, excluir').setStyle(ButtonStyle.Danger),
         new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('cancel')).setLabel('Cancelar').setStyle(ButtonStyle.Secondary),
       ),
     );
@@ -701,6 +769,17 @@ async function buildBackupPayload(interaction, prisma, session) {
     return { embeds: [embed], components };
   }
 
+  if (state === BACKUP_STATES.DONE_DELETE) {
+    embed.setTitle('✅ Backup excluído').setDescription('O backup foi removido com sucesso.');
+    components.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('home')).setLabel('Voltar ao início').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('start:verify')).setLabel('Ver backups').setStyle(ButtonStyle.Primary),
+      ),
+    );
+    return { embeds: [embed], components };
+  }
+
   if (state === BACKUP_STATES.CANCELLED) {
     embed.setTitle('🚫 Operação cancelada');
     components.push(new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(CUSTOM_IDS.BACKUP('home')).setLabel('Voltar ao início').setStyle(ButtonStyle.Secondary)));
@@ -711,6 +790,11 @@ async function buildBackupPayload(interaction, prisma, session) {
 }
 
 async function presentRoot(interaction, prisma) {
+  if (action === 'select_category' && interaction.isChannelSelectMenu()) {
+    const categoryId = interaction.values?.[0] || null;
+    return go({ state: BACKUP_STATES.SELECT_CATEGORY, categoryId });
+  }
+
   await ensureDeferred(interaction);
   const cfg = await getProtectionsConfig(prisma);
   const embed = buildRootEmbed(cfg);
@@ -820,6 +904,7 @@ async function handleBackupInteraction(interaction, prisma) {
       }
       return true;
     }
+    // catfilter modal removido
     return false;
   }
 
@@ -834,7 +919,12 @@ async function handleBackupInteraction(interaction, prisma) {
 
   const runRestore = async (backupId, scopes, backup) => {
     const totalSteps = scopes.length || 1;
-    const scopeLabel = (scope) => (scope === BACKUP_SCOPES.ROLES ? 'Cargos' : scope === BACKUP_SCOPES.CHANNELS ? 'Canais/Categorias' : scope || '—');
+    const scopeLabel = (scope) => {
+      if (scope === BACKUP_SCOPES.ROLES) return 'Cargos';
+      if (scope === BACKUP_SCOPES.CHANNELS) return 'Canais/Categorias';
+      if (scope === BACKUP_SCOPES.CHANNELS_CATEGORY) return 'Canais da categoria';
+      return scope || '—';
+    };
     const updateUI = async (stage, scope, message) => {
       const percent = Math.round((stage / Math.max(totalSteps, 1)) * 100);
       await presentBackup(interaction, prisma, {
@@ -854,7 +944,7 @@ async function handleBackupInteraction(interaction, prisma) {
     console.log('[backup] restore start', { guild: interaction.guild.id, backupId, scopes });
     await updateUI(0, scopes[0], 'Preparando restauração...');
 
-    let result = { channels: { created: 0, updated: 0 }, roles: { created: 0, updated: 0 } };
+  let result = { channels: { created: 0, updated: 0 }, roles: { created: 0, updated: 0 } };
 
     if (scopes.includes(BACKUP_SCOPES.ROLES)) {
       await updateUI(0, BACKUP_SCOPES.ROLES, 'Restaurando cargos...');
@@ -868,16 +958,18 @@ async function handleBackupInteraction(interaction, prisma) {
       backup = resRoles.backup || backup;
     }
 
-    if (scopes.includes(BACKUP_SCOPES.CHANNELS)) {
+    const wantsChannels = scopes.includes(BACKUP_SCOPES.CHANNELS) || scopes.includes(BACKUP_SCOPES.CHANNELS_CATEGORY);
+    if (wantsChannels) {
+      const channelScope = scopes.find((s) => s === BACKUP_SCOPES.CHANNELS_CATEGORY) || BACKUP_SCOPES.CHANNELS;
       const stageIdx = scopes.includes(BACKUP_SCOPES.ROLES) ? 1 : 0;
-      await updateUI(stageIdx, BACKUP_SCOPES.CHANNELS, 'Restaurando canais/categorias...');
-      const resChannels = await restoreBackup(prisma, interaction.guild, backupId, [BACKUP_SCOPES.CHANNELS]).catch((e) => {
+      await updateUI(stageIdx, channelScope, 'Restaurando canais/categorias...');
+      const resChannels = await restoreBackup(prisma, interaction.guild, backupId, [channelScope]).catch((e) => {
         console.error('[backup] restore failed channels', e);
         return null;
       });
       if (!resChannels) return null;
       result.channels = resChannels.result?.channels || result.channels;
-      await updateUI(totalSteps, BACKUP_SCOPES.CHANNELS, 'Canais/categorias restaurados.');
+      await updateUI(totalSteps, channelScope, 'Canais restaurados.');
       backup = resChannels.backup || backup;
     }
 
@@ -896,16 +988,36 @@ async function handleBackupInteraction(interaction, prisma) {
 
   if (action === 'start') {
     if (extra === 'create') return go({ state: BACKUP_STATES.CREATE_SCOPE, mode: 'create' });
+    if (extra === 'create_category') return go({ state: BACKUP_STATES.SELECT_CATEGORY, mode: 'create_category', scopes: [BACKUP_SCOPES.CHANNELS_CATEGORY], categoryId: null });
     if (extra === 'verify') return go({ state: BACKUP_STATES.SELECT_BACKUP, mode: 'verify', page: 0, selectedBackupId: null });
     if (extra === 'restore') return go({ state: BACKUP_STATES.SELECT_BACKUP, mode: 'restore', page: 0, selectedBackupId: null });
   }
 
+  if (action === 'select_category' && interaction.isChannelSelectMenu()) {
+    const categoryId = interaction.values?.[0] || null;
+    return go({
+      state: BACKUP_STATES.SELECT_CATEGORY,
+      categoryId,
+      mode: session.mode,
+      scopes: session.scopes,
+      name: session.name,
+    });
+  }
+
   if (action === 'scope' && interaction.isStringSelectMenu()) {
     const scopes = interaction.values || DEFAULT_BACKUP_SCOPES;
-    return go({ state: BACKUP_STATES.CREATE_SCOPE, scopes });
+    const nextState = { state: BACKUP_STATES.CREATE_SCOPE, scopes };
+    // Escopo de categoria não é mais escolhível; limpar categoria para fluxo padrão
+    nextState.categoryId = null;
+    nextState.categoryFilter = '';
+    return go(nextState);
   }
 
   if (action === 'next' && extra === 'naming') {
+    const wantsCategory = session.mode === 'create_category' || session.scopes.includes(BACKUP_SCOPES.CHANNELS_CATEGORY);
+    if (wantsCategory && !session.categoryId) {
+      return go({ state: BACKUP_STATES.SELECT_CATEGORY });
+    }
     return go({ state: BACKUP_STATES.CREATE_NAME });
   }
 
@@ -924,13 +1036,21 @@ async function handleBackupInteraction(interaction, prisma) {
     return true;
   }
 
+  // filtro por modal removido — canal select já tem busca nativa
+
   await ensureDeferred(interaction);
 
   if (action === 'create') {
+    const wantsCategory = session.mode === 'create_category' || session.scopes.includes(BACKUP_SCOPES.CHANNELS_CATEGORY);
+    if (wantsCategory && !session.categoryId) {
+      await interaction.followUp({ content: 'Selecione uma categoria antes de criar o backup.', ephemeral: true }).catch(() => {});
+      return go({ state: BACKUP_STATES.SELECT_CATEGORY });
+    }
     await go({ state: BACKUP_STATES.CREATING });
     const backup = await createBackup(prisma, interaction.guild, interaction.user.id, {
       name: session.name,
-      scopes: session.scopes || DEFAULT_BACKUP_SCOPES,
+      scopes: wantsCategory ? [BACKUP_SCOPES.CHANNELS_CATEGORY] : (session.scopes || DEFAULT_BACKUP_SCOPES),
+      categoryId: wantsCategory ? session.categoryId : null,
     }).catch(() => null);
     if (!backup) {
       await interaction.followUp({ content: 'Falha ao criar backup.', ephemeral: true }).catch(() => {});
@@ -985,6 +1105,28 @@ async function handleBackupInteraction(interaction, prisma) {
       return go({ state: BACKUP_STATES.CANCELLED });
     }
     return go({ state: BACKUP_STATES.DONE_RESTORE, restoreResult: res.result, lastBackup: res.backup, restoreScopes: scopes });
+  }
+
+  if (action === 'delete') {
+    const backupId = session.selectedBackupId || session.lastBackup?.backupId;
+    if (!backupId) return go({ state: BACKUP_STATES.SELECT_BACKUP, mode: 'restore' });
+    const backup = session.lastBackup || (await getBackup(prisma, backupId, interaction.guild.id).catch(() => null));
+    if (!backup) {
+      await interaction.followUp({ content: 'Backup não encontrado.', ephemeral: true }).catch(() => {});
+      return go({ state: BACKUP_STATES.SELECT_BACKUP, mode: 'restore' });
+    }
+    return go({ state: BACKUP_STATES.CONFIRM_DELETE, selectedBackupId: backupId, lastBackup: backup });
+  }
+
+  if (action === 'confirm_delete') {
+    const backupId = session.selectedBackupId || session.lastBackup?.backupId;
+    if (!backupId) return go({ state: BACKUP_STATES.SELECT_BACKUP, mode: 'restore' });
+    const ok = await deleteBackup(prisma, backupId, interaction.guild.id).catch(() => false);
+    if (!ok) {
+      await interaction.followUp({ content: 'Falha ao excluir backup.', ephemeral: true }).catch(() => {});
+      return go({ state: BACKUP_STATES.CANCELLED });
+    }
+    return go({ state: BACKUP_STATES.DONE_DELETE, selectedBackupId: null, lastBackup: null });
   }
 
   if (action === 'restore' && extra === 'scope' && interaction.isStringSelectMenu()) {
