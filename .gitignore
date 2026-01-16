@@ -22,11 +22,16 @@ Thumbs.db
 .vscode/
 
 # Prisma/SQLite
+# Ignore database files, but KEEP migrations for version control
 prisma/dev.db
-prisma/migrations/
 prisma/dev.db-journal
 *.sqlite
 *.sqlite-journal
+*.db
+*.db-journal
+
+# Keep migrations folder (commented out):
+# prisma/migrations/
 
 # Coverage/Build
 coverage/

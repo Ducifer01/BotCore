@@ -4,7 +4,8 @@ Bot Discord em JavaScript com Prisma (SQLite) e permissões dinâmicas por coman
 
 ## 📚 Documentação
 
-- **[Sistema de Proteções](./docs/PROTECTIONS_SYSTEM.md)** - Documentação técnica completa dos 11 módulos de proteção, backup/restore e whitelist
+- **[🐳 Tutorial Docker (Iniciantes)](./TUTORIAL_DOCKER.md)** - Guia completo passo a passo para rodar com Docker
+- **[🛡️ Sistema de Proteções](./docs/PROTECTIONS_SYSTEM.md)** - Documentação técnica completa dos 11 módulos de proteção, backup/restore e whitelist
 - **Sistema de Verificação** - Ver seção abaixo
 - **Restrições de Voz** - Ver seção abaixo
 
@@ -13,8 +14,55 @@ Bot Discord em JavaScript com Prisma (SQLite) e permissões dinâmicas por coman
 - Token e Client ID do bot no Discord
 - ID da Guild de desenvolvimento
 
-## Configuração
-1. Copie `.env.example` para `.env` e preencha:
+## 🐳 Execução com Docker (Recomendado)
+
+**Para um tutorial completo e detalhado, veja: [TUTORIAL_DOCKER.md](./TUTORIAL_DOCKER.md)**
+
+### Início Rápido
+
+1. **Configure o arquivo `.env`:**
+```powershell
+Copy-Item .env.example .env
+# Edite o .env com suas credenciais
+```
+
+2. **Prepare o banco de dados:**
+```powershell
+docker compose run --rm bot npx prisma migrate deploy
+```
+
+3. **Inicie o bot:**
+```powershell
+docker compose up -d
+```
+
+4. **Veja os logs:**
+```powershell
+docker compose logs -f bot
+```
+
+### Comandos Úteis
+
+```powershell
+# Parar o bot
+docker compose down
+
+# Reiniciar
+docker compose restart
+
+# Reconstruir após mudanças
+docker compose up -d --build
+
+# Ver status
+docker compose ps
+```
+
+---
+
+## 💻 Execução Local (Desenvolvimento)
+
+### 1. Configure o ambiente
+Copie `.env.example` para `.env` e preencha:
 ```
 DISCORD_TOKEN=seu_token
 DISCORD_CLIENT_ID=seu_client_id
@@ -23,55 +71,28 @@ DATABASE_URL="file:./dev.db"
 ALLOWED_GUILD_IDS=ID_GUILD_1,ID_GUILD_2
 ```
 
-2. Instale dependências:
+### 2. Instale as dependências
 
 ```powershell
 npm install
 ```
 
-3. Gere o cliente Prisma e migre o banco:
+### 3. Prepare o banco de dados
 
 ```powershell
 npm run prisma:generate
 npm run prisma:migrate
 ```
 
-4. Execute o bot (os comandos serão sincronizados automaticamente ao iniciar):
+### 4. Execute o bot
 
 ```powershell
 npm run dev
 ```
 
-## Execução com Docker
-1. Garanta que o arquivo `.env` existe (copiado de `.env.example`). Os valores serão injetados automaticamente pelo Compose.
-2. Gere/migre o banco dentro do container (usa o volume `./data` para persistir o SQLite):
+Os comandos serão sincronizados automaticamente ao iniciar.
 
-```powershell
-docker compose run --rm bot npx prisma migrate deploy
-```
-
-3. Construa e suba o bot:
-
-```powershell
-docker compose up --build -d
-```
-
-4. Para acompanhar os logs:
-
-```powershell
-docker compose logs -f bot
-```
-
-5. Para parar tudo:
-
-```powershell
-docker compose down
-```
-
-Notas rápidas:
-- O arquivo SQLite é salvo em `./data/dev.db` no host para persistir entre reinícios.
-- Você pode ajustar `DATABASE_URL` no `.env` se quiser outro caminho.
-- As migrações podem ser reaplicadas a qualquer momento com o mesmo comando do passo 2.
+---
 
 ## Permissões dinâmicas
 - No `/menu`, escolha **Configurar Permissões** para definir quais cargos podem usar cada comando (exceto os que já possuem painel dedicado, como `/ban` e `/castigo`).
