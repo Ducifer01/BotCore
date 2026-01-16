@@ -1,6 +1,10 @@
 const { EmbedBuilder, ChannelType } = require('discord.js');
 const { getPrisma } = require('../db');
 const { getVoiceRestrictionsConfig, isRestrictedPair } = require('../services/voiceRestrictions');
+const { runCastigo } = require('../actions/moderationActions');
+
+// Rastreamento de tentativas: userId => { attempts: number, firstAttempt: timestamp, lastNotification: timestamp }
+const attemptTracker = new Map();
 
 function pickTextChannelForVoice(voiceChannel) {
   if (!voiceChannel?.guild) return null;
@@ -34,6 +38,74 @@ async function notifyChannel(voiceChannel, entrant, occupant) {
   await textChannel.send({ content }).catch(() => {});
 }
 
+async function sendUserNotification(voiceChannel, supportChannelId, entrant) {
+  const textChannel = pickTextChannelForVoice(voiceChannel);
+  if (!textChannel) return;
+  
+  const supportMention = supportChannelId ? ` Qualquer dúvida, consulte o suporte <#${supportChannelId}>` : '';
+  
+  const embed = new EmbedBuilder()
+    .setTitle('⚠️ Sistema de Restrição')
+    .setDescription(`Olá ${entrant}, você não pode entrar nessa call, pois uma pessoa tem restrição contra você.${supportMention}`)
+    .setColor(0xfacc15)
+    .setTimestamp();
+  
+  const msg = await textChannel.send({ embeds: [embed] }).catch(() => null);
+  if (msg) {
+    setTimeout(() => msg.delete().catch(() => {}), 20000);
+  }
+}
+
+function trackAttempt(userId, cfg) {
+  const now = Date.now();
+  const windowMs = (cfg.antiSpam?.windowSeconds || 60) * 1000;
+  const maxAttempts = cfg.antiSpam?.maxAttempts || 3;
+  
+  let record = attemptTracker.get(userId);
+  
+  if (!record || (now - record.firstAttempt) > windowMs) {
+    // Nova janela
+    record = { attempts: 1, firstAttempt: now, lastNotification: now };
+    attemptTracker.set(userId, record);
+    return { shouldNotify: true, shouldPunish: false, attempts: 1 };
+  }
+  
+  // Incrementa tentativas
+  record.attempts += 1;
+  const shouldNotify = (now - record.lastNotification) > 10000; // Só notifica se passou 10s da última
+  
+  if (shouldNotify) {
+    record.lastNotification = now;
+  }
+  
+  attemptTracker.set(userId, record);
+  
+  const shouldPunish = record.attempts >= maxAttempts;
+  
+  return { shouldNotify, shouldPunish, attempts: record.attempts };
+}
+
+async function applyPunishment(guild, member, cfg, prisma) {
+  const punishmentMinutes = cfg.antiSpam?.punishmentMinutes || 5;
+  const reason = 'Desobedecendo a restrição imposta';
+  
+  try {
+    await runCastigo({
+      guild,
+      moderatorMember: guild.members.me,
+      targetMember: member,
+      reason,
+      durationInput: `${punishmentMinutes}m`,
+      prisma,
+      posseId: null,
+      commandChannelId: null,
+    });
+    console.log(`[voiceRestrictions] Castigo aplicado em ${member.id} por ${punishmentMinutes}m`);
+  } catch (err) {
+    console.warn('[voiceRestrictions] Erro ao aplicar castigo:', err?.message || err);
+  }
+}
+
 function register(client) {
   client.on('voiceStateUpdate', async (oldState, newState) => {
     try {
@@ -43,25 +115,55 @@ function register(client) {
       if (!guild) return;
       const prisma = client.prisma || getPrisma();
       const cfg = await getVoiceRestrictionsConfig(prisma);
+
       if (!cfg?.enabled) return;
 
       const channel = newState.channel;
       if (!channel) return; // saiu da call
-      const monitored = (cfg.monitoredChannels || []).includes(channel.id) || (cfg.monitoredCategories || []).includes(channel.parentId);
+      
+      const hasSelections = (cfg.monitoredChannels?.length > 0) || (cfg.monitoredCategories?.length > 0);
+      const monitored = hasSelections
+        ? ((cfg.monitoredChannels || []).includes(channel.id) || (cfg.monitoredCategories || []).includes(channel.parentId))
+        : true; // Se vazio, monitora tudo
+      
       if (!monitored) return;
 
       const entrant = newState.member;
       if (!entrant) return;
       const occupants = channel.members?.filter((m) => m.id !== entrant.id) || [];
+      
       if (!occupants.size) return;
 
       const match = occupants.find((m) => isRestrictedPair(cfg, entrant.id, m.id));
+      
       if (!match) return;
 
+      console.log('[voiceRestrictions] Par restrito detectado:', entrant.id, 'com', match.id);
+
+      // Rastrear tentativa e decidir ações
+      const { shouldNotify, shouldPunish, attempts } = trackAttempt(entrant.id, cfg);
+      
+      console.log(`[voiceRestrictions] Tentativa ${attempts}/${cfg.antiSpam?.maxAttempts || 3}`);
+
+      // Desconectar sempre
       await entrant.voice?.disconnect?.().catch(() => {});
-      await notifyChannel(channel, entrant, match);
+      
+      // Notificar usuário se não for spam
+      if (shouldNotify) {
+        await sendUserNotification(channel, cfg.supportChannelId, entrant);
+      }
+      
+      // Log de ação
       const pairReason = (cfg.restrictions || []).find((r) => !r.removedAt && ((r.a === entrant.id && r.b === match.id) || (r.a === match.id && r.b === entrant.id)))?.reason;
       await sendActionLog(guild, cfg.actionLogChannelId, { entrant, occupant: match, channel, reason: pairReason });
+      
+      // Aplicar castigo se ultrapassou limite
+      if (shouldPunish) {
+        console.log('[voiceRestrictions] Limite excedido! Aplicando castigo...');
+        await applyPunishment(guild, entrant, cfg, prisma);
+        // Limpar registro após punir
+        attemptTracker.delete(entrant.id);
+      }
     } catch (err) {
       console.warn('[voiceRestrictions] erro no voiceStateUpdate', err?.message || err);
     }

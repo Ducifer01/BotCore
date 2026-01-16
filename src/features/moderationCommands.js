@@ -5,7 +5,6 @@ const { getGlobalConfig } = require('../services/globalConfig');
 const { getUserStats } = require('../services/userStats');
 const { getAllowedRolesForCommand } = require('../services/commandPermissions');
 const { addToBlacklist, removeFromBlacklist, isBlacklisted, getBlacklistEntry, listBlacklist } = require('../services/blacklist');
-const { addRestriction, removeRestriction, listRestrictions, getVoiceRestrictionsConfig } = require('../services/voiceRestrictions');
 const { checkAccessForMember } = require('../permissions');
 
 const PREFIX = '!';
@@ -160,9 +159,6 @@ const COMMAND_HANDLERS = {
   addblacklist: handlePrefixAddBlacklist,
   removeblacklist: handlePrefixRemoveBlacklist,
   verblacklist: handlePrefixVerBlacklist,
-  addrestricao: handlePrefixAddRestriction,
-  rmrestricao: handlePrefixRemoveRestriction,
-  lstrestricoes: handlePrefixListRestrictions,
 };
 
 const pingCooldowns = new Map();
@@ -319,80 +315,6 @@ async function handlePrefixRemoveCastigo(message, args, prisma, posseId) {
     posseId,
   });
   await sendSuccessFeedback(message.channel, result.message, result.logEmbed);
-}
-
-async function sendRestrictionCommandLog(guild, channelId, { action, userA, userB, moderator, reason }) {
-  if (!channelId) return;
-  const channel = await guild.channels.fetch(channelId).catch(() => null);
-  if (!channel || !channel.isTextBased()) return;
-  const embed = new EmbedBuilder()
-    .setTitle(`🔒 Restrição de voz — ${action}`)
-    .setColor(action === 'removida' ? 0x3498db : 0xe67e22)
-    .addFields(
-      userA ? { name: 'Usuário A', value: `${userA.tag || userA.id} (${userA.id})` } : null,
-      userB ? { name: 'Usuário B', value: `${userB.tag || userB.id} (${userB.id})` } : null,
-      moderator ? { name: 'Mod', value: `${moderator.tag || moderator.id} (${moderator.id})` } : null,
-      reason ? { name: 'Motivo', value: reason } : null,
-    )
-    .setTimestamp(new Date());
-  await channel.send({ embeds: [embed] }).catch(() => {});
-}
-
-async function handlePrefixAddRestriction(message, args, prisma) {
-  const hasAccess = await checkAccessForMember(message.member, 'addrestricao', prisma);
-  if (!hasAccess) {
-    throw new PermissionError('Você não tem permissão para este comando.');
-  }
-  if (args.length < 2) {
-    throw new CommandUsageError('Use: !addrestricao @user1 @user2 [motivo]', 'addrestricao');
-  }
-  const userAId = extractId(args.shift());
-  const userBId = extractId(args.shift());
-  if (!userAId || !userBId) throw new CommandUsageError('Informe dois usuários. Ex: !addrestricao @user1 @user2 Motivo', 'addrestricao');
-  const reason = args.join(' ').trim() || null;
-  await addRestriction(prisma, userAId, userBId, { reason, authorId: message.author.id });
-  const cfg = await getVoiceRestrictionsConfig(prisma);
-  const userA = await message.guild.members.fetch(userAId).catch(() => ({ id: userAId }));
-  const userB = await message.guild.members.fetch(userBId).catch(() => ({ id: userBId }));
-  await sendRestrictionCommandLog(message.guild, cfg.commandLogChannelId, { action: 'adicionada', userA, userB, moderator: message.author, reason });
-  await sendTemporaryMessage(message.channel, 'Restrição adicionada.', TEMP_MESSAGE_TTL);
-}
-
-async function handlePrefixRemoveRestriction(message, args, prisma) {
-  const hasAccess = await checkAccessForMember(message.member, 'rmrestricao', prisma);
-  if (!hasAccess) {
-    throw new PermissionError('Você não tem permissão para este comando.');
-  }
-  if (args.length < 2) {
-    throw new CommandUsageError('Use: !rmrestricao @user1 @user2 [motivo]', 'rmrestricao');
-  }
-  const userAId = extractId(args.shift());
-  const userBId = extractId(args.shift());
-  if (!userAId || !userBId) throw new CommandUsageError('Informe dois usuários. Ex: !rmrestricao @user1 @user2 Motivo', 'rmrestricao');
-  const reason = args.join(' ').trim() || null;
-  await removeRestriction(prisma, userAId, userBId, { reason, authorId: message.author.id });
-  const cfg = await getVoiceRestrictionsConfig(prisma);
-  const userA = await message.guild.members.fetch(userAId).catch(() => ({ id: userAId }));
-  const userB = await message.guild.members.fetch(userBId).catch(() => ({ id: userBId }));
-  await sendRestrictionCommandLog(message.guild, cfg.commandLogChannelId, { action: 'removida', userA, userB, moderator: message.author, reason });
-  await sendTemporaryMessage(message.channel, 'Restrição removida.', TEMP_MESSAGE_TTL);
-}
-
-async function handlePrefixListRestrictions(message, args, prisma) {
-  const hasAccess = await checkAccessForMember(message.member, 'lstrestricoes', prisma);
-  if (!hasAccess) {
-    throw new PermissionError('Você não tem permissão para este comando.');
-  }
-  const page = Math.max(0, parseInt(args[0], 10) || 0);
-  const items = (await listRestrictions(prisma)).filter((r) => !r.removedAt);
-  const pageSize = 10;
-  const slice = items.slice(page * pageSize, (page + 1) * pageSize);
-  if (!slice.length) {
-    await sendTemporaryMessage(message.channel, 'Nenhuma restrição encontrada nesta página.', TEMP_MESSAGE_TTL);
-    return;
-  }
-  const lines = slice.map((r, idx) => `${page * pageSize + idx + 1}. <@${r.a}> × <@${r.b}> ${r.reason ? `- ${r.reason}` : ''}`);
-  await sendTemporaryMessage(message.channel, lines.join('\n'), TEMP_MESSAGE_TTL);
 }
 
 async function handlePrefixAddBlacklist(message, args, prisma, posseId) {

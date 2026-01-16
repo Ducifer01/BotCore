@@ -105,6 +105,12 @@ function defaultConfig() {
       monitoredChannels: [],
       commandLogChannelId: null,
       actionLogChannelId: null,
+      supportChannelId: null,
+      antiSpam: {
+        maxAttempts: 3,
+        windowSeconds: 60,
+        punishmentMinutes: 5,
+      },
       restrictions: [], // { a, b, reason, createdBy, createdAt, removedBy?, removedAt?, removeReason? }
     },
   };
@@ -168,6 +174,11 @@ function mergeConfig(raw) {
       restrictions: raw?.voiceRestrictions?.restrictions || base.voiceRestrictions.restrictions,
       commandLogChannelId: raw?.voiceRestrictions?.commandLogChannelId || base.voiceRestrictions.commandLogChannelId,
       actionLogChannelId: raw?.voiceRestrictions?.actionLogChannelId || base.voiceRestrictions.actionLogChannelId,
+      supportChannelId: raw?.voiceRestrictions?.supportChannelId || base.voiceRestrictions.supportChannelId,
+      antiSpam: {
+        ...base.voiceRestrictions.antiSpam,
+        ...(raw?.voiceRestrictions?.antiSpam || {}),
+      },
     },
   };
 }

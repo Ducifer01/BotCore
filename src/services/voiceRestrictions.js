@@ -44,17 +44,20 @@ async function addRestriction(prisma, userA, userB, { reason = null, authorId })
 
 async function removeRestriction(prisma, userA, userB, { reason = null, authorId }) {
   const now = new Date().toISOString();
-  return setVoiceRestrictionsConfig(prisma, (prev) => {
+  let found = false;
+  await setVoiceRestrictionsConfig(prisma, (prev) => {
     const { a, b } = normalizePair(userA, userB);
     const next = { ...prev };
     next.restrictions = (prev.restrictions || []).map((r) => {
       if (r.a === a && r.b === b && !r.removedAt) {
+        found = true;
         return { ...r, removedAt: now, removedBy: authorId || null, removeReason: reason || null };
       }
       return r;
     });
     return next;
   });
+  return found;
 }
 
 async function listRestrictions(prisma) {
