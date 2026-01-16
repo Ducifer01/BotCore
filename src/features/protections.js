@@ -202,6 +202,12 @@ function buildRootComponents(selected) {
   return [row, back];
 }
 
+/**
+ * Constrói embed de configuração para um módulo de proteção
+ * @param {Object} module - Definição do módulo (MODULES array)
+ * @param {Object} cfg - Configuração atual completa
+ * @returns {EmbedBuilder} Embed configurado com fields dinâmicos
+ */
 function buildModuleEmbed(module, cfg) {
   const state = cfg[module.id] || {};
   const fields = [
@@ -239,6 +245,14 @@ function buildModuleEmbed(module, cfg) {
     .setColor(state.enabled ? 0x2ecc71 : 0x5865f2);
 }
 
+/**
+ * Constrói components (botões, selects) para um módulo de proteção
+ * Inclui paginação especial para antiCriticalPerms (12 permissions, 5/row, 2 rows/página)
+ * @param {Object} module - Definição do módulo
+ * @param {Object} cfg - Configuração atual
+ * @param {Object} opts - Opções { page: number }
+ * @returns {Array<ActionRowBuilder>} Array de action rows (máx 5)
+ */
 function buildModuleComponents(module, cfg, opts = {}) {
   const page = Math.max(0, opts.page || 0);
   const state = cfg[module.id] || {};
@@ -306,10 +320,11 @@ function buildModuleComponents(module, cfg, opts = {}) {
     }
   }
 
+  // antiCriticalPerms: paginação especial para 12 permissions (5 buttons/row, 2 rows/page = 10 perms/page)
   if (module.id === 'antiCriticalPerms') {
     const activeSet = new Set(state.blockedPerms || []);
     const buttonsPerRow = 5;
-    const perPage = 10; // 2 rows x 5 buttons to respeitar limite de 5 action rows
+    const perPage = 10; // 2 rows x 5 buttons para respeitar limite de 5 action rows
     const totalPerms = (DEFAULT_CRITICAL_PERMS || []).length;
     const maxPage = Math.max(0, Math.ceil(totalPerms / perPage) - 1);
     const currentPage = Math.min(page, maxPage);
@@ -325,7 +340,7 @@ function buildModuleComponents(module, cfg, opts = {}) {
       rows.push(new ActionRowBuilder().addComponents(permButtons.slice(i, i + buttonsPerRow)));
     }
 
-    // Controles de paginação + navegação sem estourar o limite de 5 action rows
+    // Controles de navegação (prev/next, whitelist, voltar) em um único row
     const hasPagination = maxPage > 0;
     const navButtons = [];
     if (hasPagination) {
@@ -344,7 +359,7 @@ function buildModuleComponents(module, cfg, opts = {}) {
     }
     rows.push(new ActionRowBuilder().addComponents(navButtons.slice(0, 5)));
 
-    // Já incluímos navegação e voltar no mesmo row; evitamos adicionar outro row de voltar no final.
+    // Navegação já incluída acima; retornamos sem adicionar row duplicado
     return rows;
   }
 
@@ -364,6 +379,13 @@ function buildModuleComponents(module, cfg, opts = {}) {
   return rows;
 }
 
+/**
+ * Constrói components para edição de whitelist de um módulo específico
+ * Inclui UserSelectMenu e RoleSelectMenu com defaults pré-preenchidos (máx 25 cada)
+ * @param {Object} module - Definição do módulo
+ * @param {Object} cfg - Configuração atual
+ * @returns {Array<ActionRowBuilder>} Array de 3 action rows (users, roles, navegação)
+ */
 function buildWhitelistComponents(module, cfg) {
   const state = cfg[module.id] || {};
   const defaultWhitelistUsers = Array.isArray(state.whitelistUsers) ? state.whitelistUsers.slice(0, 25) : [];
@@ -395,6 +417,11 @@ function buildWhitelistComponents(module, cfg) {
   return rows;
 }
 
+/**
+ * Constrói components para edição da whitelist global (válida para todos os módulos)
+ * @param {Object} cfg - Configuração completa
+ * @returns {Array<ActionRowBuilder>} Array de 3 action rows
+ */
 function buildGlobalWhitelistComponents(cfg) {
   const defaultUsers = Array.isArray(cfg.globalWhitelistUsers) ? cfg.globalWhitelistUsers.slice(0, 25) : [];
   const defaultRoles = Array.isArray(cfg.globalWhitelistRoles) ? cfg.globalWhitelistRoles.slice(0, 25) : [];
@@ -428,9 +455,14 @@ function buildGlobalWhitelistComponents(cfg) {
 const DEFAULT_BACKUP_SCOPES = [BACKUP_SCOPES.CHANNELS, BACKUP_SCOPES.ROLES];
 const backupSessions = new Map();
 
+/**
+ * Gera chave única para session de backup baseada na mensagem
+ * Para modais: extrai messageId do customId (protmodal:backup:<type>:<messageId>)
+ * Para outros: usa message.id ou interaction.id como fallback
+ * @param {Object} interaction - Interação Discord
+ * @returns {string} Chave única para session
+ */
 function backupSessionKey(interaction) {
-  // Preferimos chave estável por mensagem (painel único).
-  // Para modais: customId carrega o messageId original em protmodal:backup:<type>:<messageId>
   if (interaction?.isModalSubmit?.()) {
     const parts = String(interaction.customId || '').split(':');
     const maybeMsg = parts[3];
@@ -439,6 +471,11 @@ function backupSessionKey(interaction) {
   return interaction?.message?.id || interaction?.id || 'session';
 }
 
+/**
+ * Obtém session de backup existente ou cria com defaults
+ * @param {Object} interaction - Interação Discord
+ * @returns {Object} Session object com state, scopes, name, page, etc
+ */
 function getBackupSession(interaction) {
   const base = {
     state: BACKUP_STATES.HOME,
@@ -912,6 +949,13 @@ async function handleBackupInteraction(interaction, prisma) {
 
   const go = (data) => presentBackup(interaction, prisma, data);
 
+/**
+ * Executa restore de backup com progress tracking e error handling
+ * @param {string} backupId - ID do backup
+ * @param {Array<string>} scopes - Escopos a restaurar
+ * @param {Object} backup - Objeto do backup
+ * @returns {Promise<Object|null>} Resultado ou null em caso de erro
+ */
   const runRestore = async (backupId, scopes, backup) => {
     const totalSteps = scopes.length || 1;
     const scopeLabel = (scope) => {
@@ -937,78 +981,83 @@ async function handleBackupInteraction(interaction, prisma) {
     };
 
     console.log('[backup] restore start', { guild: interaction.guild.id, backupId, scopes });
-    await updateUI(0, scopes[0], 'Preparando restauração...');
+    
+    try {
+      await updateUI(0, scopes[0], 'Preparando restauração...');
 
-  let result = { channels: { created: 0, updated: 0 }, roles: { created: 0, updated: 0 } };
+      let result = { channels: { created: 0, updated: 0 }, roles: { created: 0, updated: 0 } };
 
-    if (scopes.includes(BACKUP_SCOPES.ROLES)) {
-      await updateUI(0, BACKUP_SCOPES.ROLES, 'Restaurando cargos...');
-      const resRoles = await restoreBackup(prisma, interaction.guild, backupId, [BACKUP_SCOPES.ROLES]).catch((e) => {
-        console.error('[backup] restore failed roles', e);
-        return null;
-      });
-      if (!resRoles) return null;
-      result.roles = resRoles.result?.roles || result.roles;
-      await updateUI(totalSteps === 1 ? totalSteps : 1, BACKUP_SCOPES.ROLES, 'Cargos restaurados.');
-      backup = resRoles.backup || backup;
+      if (scopes.includes(BACKUP_SCOPES.ROLES)) {
+        await updateUI(0, BACKUP_SCOPES.ROLES, 'Restaurando cargos...');
+        const resRoles = await restoreBackup(prisma, interaction.guild, backupId, [BACKUP_SCOPES.ROLES]).catch((e) => {
+          console.error('[backup] restore failed roles', e);
+          return null;
+        });
+        if (!resRoles) {
+          console.error('[backup] Falha crítica ao restaurar cargos');
+          return null;
+        }
+        result.roles = resRoles.result?.roles || result.roles;
+        await updateUI(totalSteps === 1 ? totalSteps : 1, BACKUP_SCOPES.ROLES, 'Cargos restaurados.');
+        backup = resRoles.backup || backup;
+      }
+
+      const wantsChannels = scopes.includes(BACKUP_SCOPES.CHANNELS) || scopes.includes(BACKUP_SCOPES.CHANNELS_CATEGORY);
+      if (wantsChannels) {
+        const channelScope = scopes.find((s) => s === BACKUP_SCOPES.CHANNELS_CATEGORY) || BACKUP_SCOPES.CHANNELS;
+        const stageIdx = scopes.includes(BACKUP_SCOPES.ROLES) ? 1 : 0;
+        await updateUI(stageIdx, channelScope, 'Restaurando canais/categorias...');
+        const resChannels = await restoreBackup(prisma, interaction.guild, backupId, [channelScope]).catch((e) => {
+          console.error('[backup] restore failed channels', e);
+          return null;
+        });
+        if (!resChannels) {
+          console.error('[backup] Falha crítica ao restaurar canais');
+          return null;
+        }
+        result.channels = resChannels.result?.channels || result.channels;
+        await updateUI(totalSteps, channelScope, 'Canais restaurados.');
+        backup = resChannels.backup || backup;
+      }
+
+      console.log('[backup] restore done', { backupId, scopes, result });
+      return { backup, result };
+    } catch (error) {
+      console.error('[backup] restore exception', { backupId, scopes, error });
+      return null;
     }
-
-    const wantsChannels = scopes.includes(BACKUP_SCOPES.CHANNELS) || scopes.includes(BACKUP_SCOPES.CHANNELS_CATEGORY);
-    if (wantsChannels) {
-      const channelScope = scopes.find((s) => s === BACKUP_SCOPES.CHANNELS_CATEGORY) || BACKUP_SCOPES.CHANNELS;
-      const stageIdx = scopes.includes(BACKUP_SCOPES.ROLES) ? 1 : 0;
-      await updateUI(stageIdx, channelScope, 'Restaurando canais/categorias...');
-      const resChannels = await restoreBackup(prisma, interaction.guild, backupId, [channelScope]).catch((e) => {
-        console.error('[backup] restore failed channels', e);
-        return null;
-      });
-      if (!resChannels) return null;
-      result.channels = resChannels.result?.channels || result.channels;
-      await updateUI(totalSteps, channelScope, 'Canais restaurados.');
-      backup = resChannels.backup || backup;
-    }
-
-    console.log('[backup] restore done', { backupId, scopes, result });
-    return { backup, result };
   };
 
   // Navegação básica
   if (action === 'home') {
+    await ensureDeferred(interaction);
     clearBackupSession(interaction);
     return go({ state: BACKUP_STATES.HOME, mode: 'home', page: 0 });
   }
   if (action === 'cancel') {
+    await ensureDeferred(interaction);
     return go({ state: BACKUP_STATES.CANCELLED });
   }
 
   if (action === 'start') {
+    await ensureDeferred(interaction);
     if (extra === 'create') return go({ state: BACKUP_STATES.CREATE_SCOPE, mode: 'create' });
     if (extra === 'create_category') return go({ state: BACKUP_STATES.SELECT_CATEGORY, mode: 'create_category', scopes: [BACKUP_SCOPES.CHANNELS_CATEGORY], categoryId: null });
     if (extra === 'verify') return go({ state: BACKUP_STATES.SELECT_BACKUP, mode: 'verify', page: 0, selectedBackupId: null });
     if (extra === 'restore') return go({ state: BACKUP_STATES.SELECT_BACKUP, mode: 'restore', page: 0, selectedBackupId: null });
   }
 
-  if (action === 'select_category' && interaction.isChannelSelectMenu()) {
-    const categoryId = interaction.values?.[0] || null;
-    return go({
-      state: BACKUP_STATES.SELECT_CATEGORY,
-      categoryId,
-      mode: session.mode,
-      scopes: session.scopes,
-      name: session.name,
-    });
-  }
-
   if (action === 'scope' && interaction.isStringSelectMenu()) {
+    await ensureDeferred(interaction);
     const scopes = interaction.values || DEFAULT_BACKUP_SCOPES;
     const nextState = { state: BACKUP_STATES.CREATE_SCOPE, scopes };
-    // Escopo de categoria não é mais escolhível; limpar categoria para fluxo padrão
     nextState.categoryId = null;
     nextState.categoryFilter = '';
     return go(nextState);
   }
 
   if (action === 'next' && extra === 'naming') {
+    await ensureDeferred(interaction);
     const wantsCategory = session.mode === 'create_category' || session.scopes.includes(BACKUP_SCOPES.CHANNELS_CATEGORY);
     if (wantsCategory && !session.categoryId) {
       return go({ state: BACKUP_STATES.SELECT_CATEGORY });
@@ -1017,7 +1066,14 @@ async function handleBackupInteraction(interaction, prisma) {
   }
 
   if (action === 'back' && extra === 'scope') {
+    await ensureDeferred(interaction);
     return go({ state: BACKUP_STATES.CREATE_SCOPE });
+  }
+
+  if (action === 'select_category' && interaction.isChannelSelectMenu()) {
+    await ensureDeferred(interaction);
+    const categoryId = interaction.values?.[0] || null;
+    return go({ state: BACKUP_STATES.SELECT_CATEGORY, categoryId });
   }
 
   if (action === 'modal' && extra === 'name') {
@@ -1146,203 +1202,255 @@ async function handleBackupInteraction(interaction, prisma) {
   return false;
 }
 
+/**
+ * Handler principal para ButtonInteraction
+ * Processa toggle, punish, limit, whitelist, protect perms, block perm toggle, paginação
+ * @param {Object} interaction - Interação de botão
+ * @param {Object} prisma - Cliente Prisma
+ * @returns {Promise<boolean>} true se processado
+ */
 async function handleButton(interaction, prisma) {
-  if ((interaction.customId || '').startsWith('prot:backup:')) {
-    return handleBackupInteraction(interaction, prisma);
-  }
-  const parts = (interaction.customId || '').split(':');
-  const [prefix, action, moduleId] = parts;
-  if (prefix !== 'prot') return false;
-  const module = moduleById(moduleId);
-  if (!module) return false;
-  if (module.disabled) return presentRoot(interaction, prisma);
-
-  // Carrega estado atual para pré-preencher modais/valores padrão
-  const cfgCurrent = await getProtectionsConfig(prisma);
-  const moduleState = cfgCurrent[moduleId] || {};
-
-  const modalActions = ['limit', 'wh', 'mindays'];
-  if (!modalActions.includes(action)) {
-    await ensureDeferred(interaction);
-  }
-
-  if (action === 'toggle') {
-    await updateConfig(prisma, (cfg) => {
-      cfg[moduleId].enabled = !cfg[moduleId].enabled;
-      return cfg;
-    });
-  }
-  if (action === 'punish') {
-    await updateConfig(prisma, (cfg) => {
-      cfg[moduleId].punishment = cyclePunishment(cfg[moduleId].punishment);
-      return cfg;
-    });
-  }
-  if (action === 'limit') {
-    const messageId = interaction.message?.id || '0';
-    const currentCount = moduleState?.limit?.count;
-    const currentSeconds = moduleState?.limit?.seconds;
-    const modal = new ModalBuilder()
-      .setCustomId(MODALS.LIMIT(moduleId, messageId))
-      .setTitle('Limite X em Y segundos')
-      .addComponents(
-        new ActionRowBuilder().addComponents(new TextInputBuilder()
-          .setCustomId('count')
-          .setLabel('Qtd (X)')
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-          .setValue(currentCount != null ? String(currentCount) : '')),
-        new ActionRowBuilder().addComponents(new TextInputBuilder()
-          .setCustomId('seconds')
-          .setLabel('Janela em segundos (Y)')
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-          .setValue(currentSeconds != null ? String(currentSeconds) : '')),
-      );
-    await interaction.showModal(modal);
-    return true;
-  }
-  if (action === 'wh') {
-    return presentWhitelist(interaction, prisma, moduleId);
-  }
-  // bloqueio de perms agora é via botões toggle
-  if (action === 'mindays') {
-    const messageId = interaction.message?.id || '0';
-    const currentDays = moduleState?.minAccountDays;
-    const modal = new ModalBuilder()
-      .setCustomId(MODALS.MIN_DAYS(moduleId, messageId))
-      .setTitle('Idade mínima (dias)')
-      .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder()
-        .setCustomId('days')
-        .setLabel('Dias')
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true)
-        .setValue(currentDays != null ? String(currentDays) : '')));
-    await interaction.showModal(modal);
-    return true;
-  }
-  if (action === 'protectperms') {
-    await updateConfig(prisma, (cfg) => {
-      cfg[moduleId].protectPermissions = !cfg[moduleId].protectPermissions;
-      return cfg;
-    });
-  }
-  if (action === 'protectassign') {
-    await updateConfig(prisma, (cfg) => {
-      cfg[moduleId].preventProtectedRoleGive = !cfg[moduleId].preventProtectedRoleGive;
-      return cfg;
-    });
-  }
-  if (action === 'blockperm' && parts.length >= 5) {
-    const page = parseInt(parts[3], 10) || 0;
-    const perm = parts.slice(4).join(':');
-    await updateConfig(prisma, (cfg) => {
-      const arr = new Set(cfg[moduleId].blockedPerms || []);
-      if (arr.has(perm)) arr.delete(perm); else arr.add(perm);
-      cfg[moduleId].blockedPerms = [...arr];
-      return cfg;
-    });
-    return presentModule(interaction, prisma, moduleId, { page });
-  }
-
-  if (action === 'page' && parts.length >= 4) {
-    const page = parseInt(parts[3], 10) || 0;
-    return presentModule(interaction, prisma, moduleId, { page });
-  }
-
-  return presentModule(interaction, prisma, moduleId);
-}
-
-async function handleSelect(interaction, prisma) {
-  if (interaction.customId === CUSTOM_IDS.MODULE_SELECT) {
-    await ensureDeferred(interaction);
-    const choice = interaction.values?.[0];
-    if (choice === 'backups') {
-      clearBackupSession(interaction);
-      return presentBackup(interaction, prisma, { state: BACKUP_STATES.HOME, mode: 'home', page: 0 });
+  try {
+    if ((interaction.customId || '').startsWith('prot:backup:')) {
+      return handleBackupInteraction(interaction, prisma);
     }
-    return presentModule(interaction, prisma, choice);
-  }
-  if (interaction.customId?.startsWith('prot:backup:')) {
-    return handleBackupInteraction(interaction, prisma);
-  }
-  if (interaction.customId === CUSTOM_IDS.GLOBAL_WH_USERS && interaction.isUserSelectMenu()) {
-    await ensureDeferred(interaction);
-    const userIds = interaction.values || [];
-    await updateConfig(prisma, (cfg) => {
-      cfg.globalWhitelistUsers = userIds;
-      return cfg;
-    });
-    return presentGlobalWhitelist(interaction, prisma);
-  }
-  if (interaction.customId === CUSTOM_IDS.GLOBAL_WH_ROLES && interaction.isRoleSelectMenu()) {
-    await ensureDeferred(interaction);
-    const roleIds = interaction.values || [];
-    await updateConfig(prisma, (cfg) => {
-      cfg.globalWhitelistRoles = roleIds;
-      return cfg;
-    });
-    return presentGlobalWhitelist(interaction, prisma);
-  }
-  const [prefix, action, moduleId] = (interaction.customId || '').split(':');
-  if (prefix !== 'prot') return false;
-  await ensureDeferred(interaction);
-  const module = moduleById(moduleId);
-  if (!module) return false;
-  const prismaUpdate = async (dataUpdater) => updateConfig(prisma, dataUpdater);
+    const parts = (interaction.customId || '').split(':');
+    const [prefix, action, moduleId] = parts;
+    if (prefix !== 'prot') return false;
+    const module = moduleById(moduleId);
+    if (!module) return false;
+    if (module.disabled) return presentRoot(interaction, prisma);
 
-  if (action === 'log' && interaction.isChannelSelectMenu()) {
-    const channelId = interaction.values?.[0];
-    await prismaUpdate((cfg) => {
-      cfg[moduleId].logChannelId = channelId;
-      return cfg;
-    });
+    // Carrega estado atual para pré-preencher modais/valores padrão
+    const cfgCurrent = await getProtectionsConfig(prisma);
+    const moduleState = cfgCurrent[moduleId] || {};
+
+    const modalActions = ['limit', 'wh', 'mindays'];
+    if (!modalActions.includes(action)) {
+      await ensureDeferred(interaction);
+    }
+
+    if (action === 'toggle') {
+      await updateConfig(prisma, (cfg) => {
+        cfg[moduleId].enabled = !cfg[moduleId].enabled;
+        return cfg;
+      });
+    }
+    if (action === 'punish') {
+      await updateConfig(prisma, (cfg) => {
+        cfg[moduleId].punishment = cyclePunishment(cfg[moduleId].punishment);
+        return cfg;
+      });
+    }
+    if (action === 'limit') {
+      const messageId = interaction.message?.id || '0';
+      const currentCount = moduleState?.limit?.count;
+      const currentSeconds = moduleState?.limit?.seconds;
+      const modal = new ModalBuilder()
+        .setCustomId(MODALS.LIMIT(moduleId, messageId))
+        .setTitle('Limite X em Y segundos')
+        .addComponents(
+          new ActionRowBuilder().addComponents(new TextInputBuilder()
+            .setCustomId('count')
+            .setLabel('Qtd (X)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setValue(currentCount != null ? String(currentCount) : '')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder()
+            .setCustomId('seconds')
+            .setLabel('Janela em segundos (Y)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setValue(currentSeconds != null ? String(currentSeconds) : '')),
+        );
+      await interaction.showModal(modal);
+      return true;
+    }
+    if (action === 'wh') {
+      return presentWhitelist(interaction, prisma, moduleId);
+    }
+    if (action === 'mindays') {
+      const messageId = interaction.message?.id || '0';
+      const currentDays = moduleState?.minAccountDays;
+      const modal = new ModalBuilder()
+        .setCustomId(MODALS.MIN_DAYS(moduleId, messageId))
+        .setTitle('Idade mínima (dias)')
+        .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder()
+          .setCustomId('days')
+          .setLabel('Dias')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setValue(currentDays != null ? String(currentDays) : '')));
+      await interaction.showModal(modal);
+      return true;
+    }
+    if (action === 'protectperms') {
+      await updateConfig(prisma, (cfg) => {
+        cfg[moduleId].protectPermissions = !cfg[moduleId].protectPermissions;
+        return cfg;
+      });
+    }
+    if (action === 'protectassign') {
+      await updateConfig(prisma, (cfg) => {
+        cfg[moduleId].preventProtectedRoleGive = !cfg[moduleId].preventProtectedRoleGive;
+        return cfg;
+      });
+    }
+    if (action === 'blockperm' && parts.length >= 5) {
+      const page = parseInt(parts[3], 10) || 0;
+      const perm = parts.slice(4).join(':');
+      await updateConfig(prisma, (cfg) => {
+        const arr = new Set(cfg[moduleId].blockedPerms || []);
+        if (arr.has(perm)) arr.delete(perm); else arr.add(perm);
+        cfg[moduleId].blockedPerms = [...arr];
+        return cfg;
+      });
+      return presentModule(interaction, prisma, moduleId, { page });
+    }
+
+    if (action === 'page' && parts.length >= 4) {
+      const page = parseInt(parts[3], 10) || 0;
+      return presentModule(interaction, prisma, moduleId, { page });
+    }
+
     return presentModule(interaction, prisma, moduleId);
+  } catch (error) {
+    console.error('[protections] Erro em handleButton:', error);
+    await interaction.followUp({ content: '❌ Erro ao processar ação. Tente novamente.', ephemeral: true }).catch(() => {});
+    return false;
   }
-
-  if (action === 'rolelimit' && interaction.isRoleSelectMenu()) {
-    const roleId = interaction.values?.[0];
-    await prismaUpdate((cfg) => {
-      cfg[moduleId].limitRoleId = roleId;
-      return cfg;
-    });
-    return presentModule(interaction, prisma, moduleId);
-  }
-
-  if (action === 'blockroles' && interaction.isRoleSelectMenu()) {
-    const roleIds = interaction.values || [];
-    await prismaUpdate((cfg) => {
-      cfg[moduleId].roles = roleIds;
-      cfg[moduleId].enabled = true;
-      return cfg;
-    });
-    return presentModule(interaction, prisma, moduleId);
-  }
-
-  if (action === 'whusers' && interaction.isUserSelectMenu()) {
-    const userIds = interaction.values || [];
-    await prismaUpdate((cfg) => {
-      cfg[moduleId].whitelistUsers = userIds;
-      return cfg;
-    });
-    return presentWhitelist(interaction, prisma, moduleId);
-  }
-
-  if (action === 'whroles' && interaction.isRoleSelectMenu()) {
-    const roleIds = interaction.values || [];
-    await prismaUpdate((cfg) => {
-      cfg[moduleId].whitelistRoles = roleIds;
-      return cfg;
-    });
-    return presentWhitelist(interaction, prisma, moduleId);
-  }
-
-  return false;
 }
 
-function parseIntSafe(val, fallback) {
+/**
+ * Handler principal para StringSelectMenu, UserSelectMenu, RoleSelectMenu, ChannelSelectMenu
+ * Processa seleção de módulos, whitelist global/local, log channels, blocked roles, etc
+ * @param {Object} interaction - Interação de select menu
+ * @param {Object} prisma - Cliente Prisma
+ * @returns {Promise<boolean>} true se processado
+ */
+async function handleSelect(interaction, prisma) {
+  try {
+    if (interaction.customId === CUSTOM_IDS.MODULE_SELECT) {
+      await ensureDeferred(interaction);
+      const choice = interaction.values?.[0];
+      if (choice === 'backups') {
+        clearBackupSession(interaction);
+        return presentBackup(interaction, prisma, { state: BACKUP_STATES.HOME, mode: 'home', page: 0 });
+      }
+      return presentModule(interaction, prisma, choice);
+    }
+    if (interaction.customId?.startsWith('prot:backup:')) {
+      return handleBackupInteraction(interaction, prisma);
+    }
+    if (interaction.customId === CUSTOM_IDS.GLOBAL_WH_USERS && interaction.isUserSelectMenu()) {
+      await ensureDeferred(interaction);
+      const userIds = interaction.values || [];
+      await updateConfig(prisma, (cfg) => {
+        cfg.globalWhitelistUsers = userIds;
+        return cfg;
+      });
+      return presentGlobalWhitelist(interaction, prisma);
+    }
+    if (interaction.customId === CUSTOM_IDS.GLOBAL_WH_ROLES && interaction.isRoleSelectMenu()) {
+      await ensureDeferred(interaction);
+      const roleIds = interaction.values || [];
+      await updateConfig(prisma, (cfg) => {
+        cfg.globalWhitelistRoles = roleIds;
+        return cfg;
+      });
+      return presentGlobalWhitelist(interaction, prisma);
+    }
+    const [prefix, action, moduleId] = (interaction.customId || '').split(':');
+    if (prefix !== 'prot') return false;
+    await ensureDeferred(interaction);
+    const module = moduleById(moduleId);
+    if (!module) return false;
+    const prismaUpdate = async (dataUpdater) => updateConfig(prisma, dataUpdater);
+
+    if (action === 'log' && interaction.isChannelSelectMenu()) {
+      const channelId = interaction.values?.[0];
+      if (!channelId) {
+        await interaction.followUp({ content: '❌ Selecione um canal válido.', ephemeral: true }).catch(() => {});
+        return presentModule(interaction, prisma, moduleId);
+      }
+      await prismaUpdate((cfg) => {
+        cfg[moduleId].logChannelId = channelId;
+        return cfg;
+      });
+      return presentModule(interaction, prisma, moduleId);
+    }
+
+    if (action === 'rolelimit' && interaction.isRoleSelectMenu()) {
+      const roleId = interaction.values?.[0];
+      if (!roleId) {
+        await interaction.followUp({ content: '❌ Selecione um cargo válido.', ephemeral: true }).catch(() => {});
+        return presentModule(interaction, prisma, moduleId);
+      }
+      await prismaUpdate((cfg) => {
+        cfg[moduleId].limitRoleId = roleId;
+        return cfg;
+      });
+      return presentModule(interaction, prisma, moduleId);
+    }
+
+    if (action === 'blockroles' && interaction.isRoleSelectMenu()) {
+      const roleIds = interaction.values || [];
+      if (!roleIds.length) {
+        await interaction.followUp({ content: '❌ Selecione pelo menos um cargo para bloquear.', ephemeral: true }).catch(() => {});
+        return presentModule(interaction, prisma, moduleId);
+      }
+      await prismaUpdate((cfg) => {
+        cfg[moduleId].roles = roleIds;
+        cfg[moduleId].enabled = true;
+        return cfg;
+      });
+      return presentModule(interaction, prisma, moduleId);
+    }
+
+    if (action === 'whusers' && interaction.isUserSelectMenu()) {
+      const userIds = interaction.values || [];
+      await prismaUpdate((cfg) => {
+        cfg[moduleId].whitelistUsers = userIds;
+        return cfg;
+      });
+      return presentWhitelist(interaction, prisma, moduleId);
+    }
+
+    if (action === 'whroles' && interaction.isRoleSelectMenu()) {
+      const roleIds = interaction.values || [];
+      await prismaUpdate((cfg) => {
+        cfg[moduleId].whitelistRoles = roleIds;
+        return cfg;
+      });
+      return presentWhitelist(interaction, prisma, moduleId);
+    }
+
+    return false;
+  } catch (error) {
+    console.error('[protections] Erro em handleSelect:', error);
+    await interaction.followUp({ content: '❌ Erro ao processar seleção. Tente novamente.', ephemeral: true }).catch(() => {});
+    return false;
+  }
+}
+
+/**
+ * Parse de forma segura um inteiro positivo com validação de range
+ * @param {string} val - Valor a parsear
+ * @param {number} fallback - Valor padrão caso parse falhe
+ * @param {Object} options - Opções de validação
+ * @param {number} options.min - Valor mínimo permitido
+ * @param {number} options.max - Valor máximo permitido
+ * @returns {number} Número parseado ou fallback
+ */
+function parseIntSafe(val, fallback, options = {}) {
   const num = parseInt(val, 10);
-  return Number.isFinite(num) && num > 0 ? num : fallback;
+  if (!Number.isFinite(num) || num < 1) return fallback;
+  
+  const { min = 1, max = Infinity } = options;
+  if (num < min) return min;
+  if (num > max) return max;
+  
+  return num;
 }
 
 function splitIds(text) {
@@ -1352,6 +1460,12 @@ function splitIds(text) {
     .filter(Boolean);
 }
 
+/**
+ * Handler para submissão de modais com validação robusta
+ * @param {Object} interaction - Interação do Discord
+ * @param {Object} prisma - Cliente Prisma
+ * @returns {Promise<boolean>} true se o modal foi processado
+ */
 async function handleModal(interaction, prisma) {
   if ((interaction.customId || '').startsWith('protmodal:backup:')) {
     return handleBackupInteraction(interaction, prisma);
@@ -1362,47 +1476,71 @@ async function handleModal(interaction, prisma) {
   const module = moduleById(moduleId);
   if (!module) return false;
 
-  if (action === 'limit') {
-    const count = parseIntSafe(interaction.fields.getTextInputValue('count'), module.hasLimit ? 3 : 1);
-    const seconds = parseIntSafe(interaction.fields.getTextInputValue('seconds'), 30);
-    await updateConfig(prisma, (cfg) => {
-      cfg[moduleId].limit = { count, seconds };
-      return cfg;
-    });
-  }
-  if (action === 'wh') {
-    const users = splitIds(interaction.fields.getTextInputValue('users'));
-    const roles = splitIds(interaction.fields.getTextInputValue('roles'));
-    await updateConfig(prisma, (cfg) => {
-      cfg[moduleId].whitelistUsers = users;
-      cfg[moduleId].whitelistRoles = roles;
-      return cfg;
-    });
-  }
-  if (action === 'mindays') {
-    const days = parseIntSafe(interaction.fields.getTextInputValue('days'), 7);
-    await updateConfig(prisma, (cfg) => {
-      cfg[moduleId].minAccountDays = days;
-      return cfg;
-    });
-  }
-
-  if (messageId && messageId !== '0') {
-    const msg = await interaction.channel?.messages?.fetch(messageId).catch(() => null);
-    if (msg) {
-      const cfg = await getProtectionsConfig(prisma);
-      const payload = buildPayload(buildModuleEmbed(module, cfg), buildModuleComponents(module, cfg));
-      await msg.edit(payload).catch(() => {});
-      // Apenas uma confirmação silenciosa para evitar criar novos embeds.
-      if (interaction.deferred || interaction.replied) {
-        await interaction.editReply({ content: 'Configuração atualizada.', components: [], embeds: [] }).catch(() => {});
-      } else {
-        await interaction.reply({ content: 'Configuração atualizada.', ephemeral: true }).catch(() => {});
+  try {
+    if (action === 'limit') {
+      const countRaw = interaction.fields.getTextInputValue('count');
+      const secondsRaw = interaction.fields.getTextInputValue('seconds');
+      
+      const count = parseIntSafe(countRaw, 3, { min: 1, max: 100 });
+      const seconds = parseIntSafe(secondsRaw, 30, { min: 1, max: 3600 });
+      
+      if (!countRaw || !secondsRaw) {
+        await interaction.followUp({ content: '❌ Preencha ambos os campos (quantidade e segundos).', ephemeral: true }).catch(() => {});
+        return presentModule(interaction, prisma, moduleId);
       }
-      return true;
+      
+      await updateConfig(prisma, (cfg) => {
+        cfg[moduleId].limit = { count, seconds };
+        return cfg;
+      });
     }
+    
+    if (action === 'wh') {
+      const users = splitIds(interaction.fields.getTextInputValue('users'));
+      const roles = splitIds(interaction.fields.getTextInputValue('roles'));
+      await updateConfig(prisma, (cfg) => {
+        cfg[moduleId].whitelistUsers = users;
+        cfg[moduleId].whitelistRoles = roles;
+        return cfg;
+      });
+    }
+    
+    if (action === 'mindays') {
+      const daysRaw = interaction.fields.getTextInputValue('days');
+      const days = parseIntSafe(daysRaw, 7, { min: 0, max: 365 });
+      
+      if (!daysRaw) {
+        await interaction.followUp({ content: '❌ Preencha o campo de dias.', ephemeral: true }).catch(() => {});
+        return presentModule(interaction, prisma, moduleId);
+      }
+      
+      await updateConfig(prisma, (cfg) => {
+        cfg[moduleId].minAccountDays = days;
+        return cfg;
+      });
+    }
+
+    if (messageId && messageId !== '0') {
+      const msg = await interaction.channel?.messages?.fetch(messageId).catch(() => null);
+      if (msg) {
+        const cfg = await getProtectionsConfig(prisma);
+        const payload = buildPayload(buildModuleEmbed(module, cfg), buildModuleComponents(module, cfg));
+        await msg.edit(payload).catch(() => {});
+        
+        if (interaction.deferred || interaction.replied) {
+          await interaction.editReply({ content: '✅ Configuração atualizada.', components: [], embeds: [] }).catch(() => {});
+        } else {
+          await interaction.reply({ content: '✅ Configuração atualizada.', ephemeral: true }).catch(() => {});
+        }
+        return true;
+      }
+    }
+    return presentModule(interaction, prisma, moduleId);
+  } catch (error) {
+    console.error(`[protections] Erro ao processar modal ${action} para ${moduleId}:`, error);
+    await interaction.followUp({ content: '❌ Erro ao processar configuração. Tente novamente.', ephemeral: true }).catch(() => {});
+    return presentModule(interaction, prisma, moduleId);
   }
-  return presentModule(interaction, prisma, moduleId);
 }
 
 async function presentMenu(interaction, ctx) {

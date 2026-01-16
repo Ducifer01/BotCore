@@ -2,6 +2,12 @@
 
 Bot Discord em JavaScript com Prisma (SQLite) e permissões dinâmicas por comando.
 
+## 📚 Documentação
+
+- **[Sistema de Proteções](./docs/PROTECTIONS_SYSTEM.md)** - Documentação técnica completa dos 11 módulos de proteção, backup/restore e whitelist
+- **Sistema de Verificação** - Ver seção abaixo
+- **Restrições de Voz** - Ver seção abaixo
+
 ## Requisitos
 - Node.js 18+
 - Token e Client ID do bot no Discord
