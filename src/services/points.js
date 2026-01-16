@@ -9,18 +9,32 @@ const FROZEN_CACHE_TTL_MS = 60_000;
 
 const frozenCache = new Map(); // key: `${globalConfigId}:${guildId}:${userId}` -> { until: Date|null, at: number }
 
+/**
+ * Converte valor para BigInt de forma segura
+ * @param {bigint|number|string} value - Valor a converter
+ * @returns {bigint} BigInt convertido
+ */
 function toBigInt(value) {
   if (typeof value === 'bigint') return value;
   if (typeof value === 'number') return BigInt(Math.trunc(value));
   return BigInt(parseInt(String(value), 10) || 0);
 }
 
+/**
+ * Retorna início do dia atual em UTC
+ * @returns {Date} Data com hora zerada (00:00:00.000)
+ */
 function getTodayUTC() {
   const d = new Date();
   d.setUTCHours(0, 0, 0, 0);
   return d;
 }
 
+/**
+ * Garante que configuração de pontos existe para a guild
+ * @param {Object} prisma - Cliente Prisma
+ * @returns {Promise<Object>} Configuração de pontos
+ */
 async function ensurePointsConfig(prisma = getPrisma()) {
   const globalConfig = await ensureGlobalConfig(prisma);
   let cfg = await prisma.pointsConfig.findUnique({ where: { globalConfigId: globalConfig.id } });
@@ -36,6 +50,11 @@ async function ensurePointsConfig(prisma = getPrisma()) {
   return cfg;
 }
 
+/**
+ * Obtém configuração completa de pontos com todas as relações
+ * @param {Object} prisma - Cliente Prisma
+ * @returns {Promise<Object>} Configuração completa com includes
+ */
 async function getPointsConfig(prisma = getPrisma()) {
   const cfg = await prisma.pointsConfig.findFirst({
     include: {
@@ -77,32 +96,62 @@ function isInvitesEnabled(cfg) {
   return isSystemEnabled(cfg) && toBigInt(cfg.pontosConvites || 0n) !== 0n;
 }
 
+/**
+ * Cria hash simplificado do conteúdo da mensagem para detectar spam
+ * @param {string} content - Conteúdo da mensagem
+ * @returns {string} Hash normalizado (trim + lowercase)
+ */
 function hashMessageContent(content) {
   if (!content) return '';
   return content.trim().toLowerCase();
 }
 
+/**
+ * Verifica se membro possui pelo menos um cargo da lista
+ * @param {Object} member - GuildMember
+ * @param {Array<string>} roleIds - Array de role IDs
+ * @returns {boolean} true se possui algum cargo
+ */
 function memberHasAnyRole(member, roleIds = []) {
   if (!member?.roles?.cache?.size || !roleIds?.length) return false;
   return roleIds.some((id) => member.roles.cache.has(id));
 }
 
+/**
+ * Clamp BigInt para >= 0 (evita valores negativos)
+ * @param {bigint} value - Valor a clampar
+ * @returns {bigint} Valor >= 0
+ */
 function clampBigIntFloorZero(value) {
   if (value < 0n) return 0n;
   return value;
 }
 
+/**
+ * Garante que balance existe para usuário na guild
+ * Cria se não existir (upsert pattern)
+ * @param {Object} prisma - Cliente Prisma
+ * @param {Object} cfg - Configuração de pontos
+ * @param {string} guildId - ID da guild
+ * @param {string} userId - ID do usuário
+ * @returns {Promise<Object>} PointsBalance com includes
+ */
 async function ensureBalance(prisma, cfg, guildId, userId) {
-  const globalConfigId = cfg.globalConfigId || cfg.id;
-  const balance = await prisma.pointsBalance.upsert({
-    where: {
-      globalConfigId_guildId_userId: { globalConfigId, guildId, userId },
-    },
-    update: {},
-    create: { globalConfigId, guildId, userId },
-    include: { chatActivity: true, voiceSession: true },
-  });
-  return balance;
+  try {
+    const globalConfigId = cfg.globalConfigId || cfg.id;
+    const balance = await prisma.pointsBalance.upsert({
+      where: {
+        globalConfigId_guildId_userId: { globalConfigId, guildId, userId },
+      },
+      update: {},
+      create: { globalConfigId, guildId, userId },
+      include: { chatActivity: true, voiceSession: true },
+    });
+    return balance;
+  } catch (error) {
+    console.error('[points] Erro ao garantir balance:', { guildId, userId, error: error.message });
+    throw error;
+  }
 }
 
 function isVoiceChannelAllowed(cfg, channel) {
@@ -152,6 +201,13 @@ function buildLeaderboardEmbed(balances, guild, refreshMinutes) {
   return embed;
 }
 
+/**
+ * Verifica se membro é elegível para ganhar pontos
+ * Checa: bot, ignoredUsers, ignoredRoles, participantRoles (se modo SELECTIVE)
+ * @param {Object} cfg - Configuração de pontos
+ * @param {Object} member - GuildMember
+ * @returns {boolean} true se elegível
+ */
 function userEligible(cfg, member) {
   if (!cfg || !member) return false;
   if (member.user?.bot) return false;
@@ -172,27 +228,54 @@ async function ensureBioAllowed(prisma, cfg, userId, options = {}) {
   return bioChecker.checkUserKeyword({ prisma, pointsCfg: cfg, userId, forceRefresh: options.forceRefresh });
 }
 
+/**
+ * Registra transação de pontos com atualização atômica do balance
+ * USA: UPDATE ... SET points = MAX(0, points + delta) para evitar race conditions
+ * Cria PointsTransaction e atualiza PointsBalance atomicamente
+ * @param {Object} prisma - Cliente Prisma
+ * @param {Object} cfg - Configuração de pontos
+ * @param {Object} params - Parâmetros da transação
+ * @param {string} params.guildId - ID da guild
+ * @param {string} params.userId - ID do usuário
+ * @param {bigint|number} params.amount - Quantidade de pontos (pode ser negativo)
+ * @param {string} params.type - Tipo: CHAT, CALL, INVITE, INVITE_REVOKE, RESET, ADMIN
+ * @param {string} params.source - Origem: SYSTEM, ADMIN
+ * @param {string} params.reason - Razão textual
+ * @param {string} [params.actorId] - ID do admin (se ADMIN source)
+ * @param {string} [params.metadata] - Metadata adicional
+ * @returns {Promise<bigint>} Novo balance após transação
+ */
 async function recordTransaction(prisma, cfg, { guildId, userId, amount, type, source = 'SYSTEM', reason, actorId, metadata }) {
-  const globalConfigId = cfg.globalConfigId || cfg.id;
-  const delta = toBigInt(amount || 0n);
-  const balance = await ensureBalance(prisma, cfg, guildId, userId);
-  // Atualização atômica + clamp a zero para evitar perdas em concorrência
-  await prisma.$executeRaw`UPDATE "PointsBalance" SET "points" = MAX(0, "points" + ${delta}) WHERE "id" = ${balance.id}`;
-  const updated = await prisma.pointsBalance.findUnique({ where: { id: balance.id } });
-  await prisma.pointsTransaction.create({
-    data: {
-      globalConfigId,
-      guildId,
-      userId,
-      amount: delta,
-      type: String(type || ''),
-      source: String(source || 'SYSTEM'),
-      reason,
-      actorId,
-      metadata: metadata == null ? null : String(metadata),
-    },
-  });
-  return toBigInt(updated?.points || 0n);
+  try {
+    const globalConfigId = cfg.globalConfigId || cfg.id;
+    const delta = toBigInt(amount || 0n);
+    const balance = await ensureBalance(prisma, cfg, guildId, userId);
+    
+    // Atualização atômica + clamp a zero para evitar perdas em concorrência
+    await prisma.$executeRaw`UPDATE "PointsBalance" SET "points" = MAX(0, "points" + ${delta}) WHERE "id" = ${balance.id}`;
+    const updated = await prisma.pointsBalance.findUnique({ where: { id: balance.id } });
+    
+    await prisma.pointsTransaction.create({
+      data: {
+        globalConfigId,
+        guildId,
+        userId,
+        amount: delta,
+        type: String(type || ''),
+        source: String(source || 'SYSTEM'),
+        reason,
+        actorId,
+        metadata: metadata == null ? null : String(metadata),
+      },
+    });
+    
+    const newBalance = toBigInt(updated?.points || 0n);
+    console.log(`[points] Transaction: ${userId} ${delta >= 0n ? '+' : ''}${delta} pts | type: ${type} | new balance: ${newBalance}`);
+    return newBalance;
+  } catch (error) {
+    console.error('[points] Erro ao registrar transação:', { guildId, userId, amount, type, error: error.message });
+    throw error;
+  }
 }
 
 async function setFrozen(prisma, cfg, { guildId, userId, expiresAt, reason, moderatorId, commandChannelId }) {
@@ -258,130 +341,233 @@ async function isFrozen(prisma, cfg, guildId, userId) {
   return false;
 }
 
+/**
+ * Handler principal para pontos de chat
+ * Validações: sistema ativado, elegibilidade, frozen, bio, cooldown, caracteres mínimos, daily limit
+ * Anti-spam: hash do conteúdo da mensagem + cooldown
+ * @param {Object} params - Parâmetros
+ * @param {Object} params.message - Discord Message object
+ * @param {Object} params.prisma - Cliente Prisma
+ * @param {Object} params.cfg - Configuração de pontos
+ * @returns {Promise<boolean>} true se pontos foram atribuídos
+ */
 async function handleChatMessage({ message, prisma, cfg }) {
-  if (!isChatEnabled(cfg)) return false;
-  if (!message.guild || !message.member) return false;
-  if (!userEligible(cfg, message.member)) return false;
-  if (await isFrozen(prisma, cfg, message.guildId, message.author.id)) return false;
-  const bioStatus = await ensureBioAllowed(prisma, cfg, message.author.id);
-  if (!bioStatus.allowed) return false;
-  const guildId = message.guildId;
-  const userId = message.author.id;
-  if (cfg.chatChannels?.length) {
-    const allowed = cfg.chatChannels.some((c) => c.channelId === message.channelId);
-    if (!allowed) return false;
-  }
-  const minChars = cfg.qtdCaracteresMin || 0;
-  if ((message.content || '').trim().length < minChars) return false;
-  const contentHash = hashMessageContent(message.content || '');
+  try {
+    if (!isChatEnabled(cfg)) return false;
+    if (!message.guild || !message.member) return false;
+    if (!userEligible(cfg, message.member)) return false;
+    if (await isFrozen(prisma, cfg, message.guildId, message.author.id)) return false;
+    
+    const bioStatus = await ensureBioAllowed(prisma, cfg, message.author.id);
+    if (!bioStatus.allowed) return false;
+    
+    const guildId = message.guildId;
+    const userId = message.author.id;
+    
+    if (cfg.chatChannels?.length) {
+      const allowed = cfg.chatChannels.some((c) => c.channelId === message.channelId);
+      if (!allowed) return false;
+    }
+    
+    const minChars = cfg.qtdCaracteresMin || 0;
+    if ((message.content || '').trim().length < minChars) return false;
+    
+    const contentHash = hashMessageContent(message.content || '');
 
-  const balance = await ensureBalance(prisma, cfg, guildId, userId);
-  let activity = await prisma.pointsChatActivity.findUnique({ where: { globalConfigId_guildId_userId: { globalConfigId: cfg.globalConfigId || cfg.id, guildId, userId } } });
-  if (!activity) {
-    activity = await prisma.pointsChatActivity.create({
-      data: {
-        globalConfigId: cfg.globalConfigId || cfg.id,
-        guildId,
-        userId,
-        lastMessageAt: null,
-        lastMessageHash: null,
-        dailyPoints: 0n,
-        dailyDate: getTodayUTC(),
-      },
+    const balance = await ensureBalance(prisma, cfg, guildId, userId);
+    let activity = await prisma.pointsChatActivity.findUnique({ 
+      where: { globalConfigId_guildId_userId: { globalConfigId: cfg.globalConfigId || cfg.id, guildId, userId } } 
     });
-  }
+    
+    if (!activity) {
+      activity = await prisma.pointsChatActivity.create({
+        data: {
+          globalConfigId: cfg.globalConfigId || cfg.id,
+          guildId,
+          userId,
+          lastMessageAt: null,
+          lastMessageHash: null,
+          dailyPoints: 0n,
+          dailyDate: getTodayUTC(),
+        },
+      });
+    }
 
-  const now = new Date();
-  if (activity.lastMessageHash && activity.lastMessageHash === contentHash) {
-    return false;
-  }
-  const cooldownMinutes = cfg.cooldownChatMinutes ?? 0;
-  if (activity.lastMessageAt) {
-    const diffMinutes = (now.getTime() - new Date(activity.lastMessageAt).getTime()) / MINUTE_MS;
-    if (diffMinutes < cooldownMinutes) {
+    const now = new Date();
+    
+    // Anti-spam: mensagem idêntica consecutiva
+    if (activity.lastMessageHash && activity.lastMessageHash === contentHash) {
       return false;
     }
-  }
-
-  let dailyPoints = toBigInt(activity.dailyPoints || 0n);
-  const today = getTodayUTC();
-  const sameDay = activity.dailyDate && new Date(activity.dailyDate).getTime() === today.getTime();
-  if (!sameDay) {
-    dailyPoints = 0n;
-  }
-  const limit = cfg.limitDailyChat ? toBigInt(cfg.limitDailyChat) : null;
-  const award = toBigInt(cfg.pontosChat || 0n);
-  if (limit !== null && dailyPoints + award > limit) {
-    const canGive = limit - dailyPoints;
-    if (canGive <= 0n) {
-      return false;
+    
+    // Cooldown check
+    const cooldownMinutes = cfg.cooldownChatMinutes ?? 0;
+    if (activity.lastMessageAt) {
+      const diffMinutes = (now.getTime() - new Date(activity.lastMessageAt).getTime()) / MINUTE_MS;
+      if (diffMinutes < cooldownMinutes) {
+        return false;
+      }
     }
-  await recordTransaction(prisma, cfg, { guildId, userId, amount: canGive, type: 'CHAT', source: 'SYSTEM', reason: 'Pontos de chat (limitado)' });
+
+    let dailyPoints = toBigInt(activity.dailyPoints || 0n);
+    const today = getTodayUTC();
+    const sameDay = activity.dailyDate && new Date(activity.dailyDate).getTime() === today.getTime();
+    if (!sameDay) {
+      dailyPoints = 0n;
+    }
+    
+    const limit = cfg.limitDailyChat ? toBigInt(cfg.limitDailyChat) : null;
+    const award = toBigInt(cfg.pontosChat || 0n);
+    
+    // Daily limit check
+    if (limit !== null && dailyPoints + award > limit) {
+      const canGive = limit - dailyPoints;
+      if (canGive <= 0n) {
+        return false;
+      }
+      
+      await recordTransaction(prisma, cfg, { 
+        guildId, 
+        userId, 
+        amount: canGive, 
+        type: 'CHAT', 
+        source: 'SYSTEM', 
+        reason: 'Pontos de chat (limitado)' 
+      });
+      
+      await prisma.pointsChatActivity.update({
+        where: { id: activity.id },
+        data: { lastMessageAt: now, lastMessageHash: contentHash, dailyPoints: limit, dailyDate: today },
+      });
+      return true;
+    }
+
+    await recordTransaction(prisma, cfg, { 
+      guildId, 
+      userId, 
+      amount: award, 
+      type: 'CHAT', 
+      source: 'SYSTEM', 
+      reason: 'Pontos por chat' 
+    });
+    
     await prisma.pointsChatActivity.update({
       where: { id: activity.id },
-      data: { lastMessageAt: now, lastMessageHash: contentHash, dailyPoints: limit, dailyDate: today },
+      data: {
+        lastMessageAt: now,
+        lastMessageHash: contentHash,
+        dailyPoints: dailyPoints + award,
+        dailyDate: today,
+      },
     });
+    
     return true;
+  } catch (error) {
+    console.error('[points] Erro em handleChatMessage:', { userId: message.author?.id, error: error.message });
+    return false;
   }
-
-  await recordTransaction(prisma, cfg, { guildId, userId, amount: award, type: 'CHAT', source: 'SYSTEM', reason: 'Pontos por chat' });
-  await prisma.pointsChatActivity.update({
-    where: { id: activity.id },
-    data: {
-      lastMessageAt: now,
-      lastMessageHash: contentHash,
-      dailyPoints: dailyPoints + award,
-      dailyDate: today,
-    },
-  });
-  return true;
 }
 
+/**
+ * Tick handler para pontos de voz (executado a cada 60 segundos)
+ * Percorre todos os canais de voz permitidos em todas as guilds
+ * Valida: minUsers, eligibility, frozen, bio, mute/deaf
+ * Acumula segundos e concede pontos a cada N minutos completos
+ * @param {Object} params - Parâmetros
+ * @param {Object} params.client - Discord Client
+ * @param {Object} params.prisma - Cliente Prisma
+ * @param {Object} params.cfg - Configuração de pontos
+ * @returns {Promise<void>}
+ */
 async function tickVoice({ client, prisma, cfg }) {
   if (!client || !isCallEnabled(cfg)) return;
-  const tempoCallMinutes = cfg.tempoCallMinutes || 5;
-  const minUsers = cfg.minUserCall || 0;
-  const awardPoints = toBigInt(cfg.pontosCall || 0n);
-  const globalConfigId = cfg.globalConfigId || cfg.id;
-  const guilds = client.guilds.cache;
-  for (const guild of guilds.values()) {
-    const voiceChannels = guild.channels.cache.filter(
-      (ch) => ch.type === ChannelType.GuildVoice || ch.type === ChannelType.GuildStageVoice,
-    );
-    for (const channel of voiceChannels.values()) {
-      if (!isVoiceChannelAllowed(cfg, channel)) continue;
-      const members = [...channel.members.values()].filter((m) => !m.user.bot);
-      if (!members.length) continue;
-      const activeMembers = members.filter((m) => {
-        if (!userEligible(cfg, m)) return false;
-        if (m.voice?.selfMute || m.voice?.serverMute) return false;
-        if (m.voice?.selfDeaf || m.voice?.serverDeaf) return false;
-        return true;
-      });
-      const participantCount = activeMembers.length;
-      if (participantCount < minUsers) continue;
-      for (const member of activeMembers) {
-        const guildId = guild.id;
-        const userId = member.id;
-        if (await isFrozen(prisma, cfg, guildId, userId)) continue;
+  
+  try {
+    const tempoCallMinutes = cfg.tempoCallMinutes || 5;
+    const minUsers = cfg.minUserCall || 0;
+    const awardPoints = toBigInt(cfg.pontosCall || 0n);
+    const globalConfigId = cfg.globalConfigId || cfg.id;
+    const guilds = client.guilds.cache;
+    
+    for (const guild of guilds.values()) {
+      const voiceChannels = guild.channels.cache.filter(
+        (ch) => ch.type === ChannelType.GuildVoice || ch.type === ChannelType.GuildStageVoice,
+      );
+      
+      for (const channel of voiceChannels.values()) {
+        if (!isVoiceChannelAllowed(cfg, channel)) continue;
+        
+        const members = [...channel.members.values()].filter((m) => !m.user.bot);
+        if (!members.length) continue;
+        
+        const activeMembers = members.filter((m) => {
+          if (!userEligible(cfg, m)) return false;
+          if (m.voice?.selfMute || m.voice?.serverMute) return false;
+          if (m.voice?.selfDeaf || m.voice?.serverDeaf) return false;
+          return true;
+        });
+        
+        const participantCount = activeMembers.length;
+        if (participantCount < minUsers) continue;
+        
+        for (const member of activeMembers) {
+          const guildId = guild.id;
+          const userId = member.id;
+          
+          if (await isFrozen(prisma, cfg, guildId, userId)) continue;
+          
           const bioStatus = await ensureBioAllowed(prisma, cfg, userId);
           if (!bioStatus.allowed) continue;
-        const balance = await ensureBalance(prisma, cfg, guildId, userId);
-        let session = await prisma.pointsVoiceSession.findUnique({ where: { globalConfigId_guildId_userId: { globalConfigId, guildId, userId } } });
-        if (!session) {
-          session = await prisma.pointsVoiceSession.create({ data: { globalConfigId, guildId, userId, channelId: channel.id, startedAt: new Date(), accumulatedSeconds: 0, lastCheckedAt: new Date() } });
-        }
-        const newAccum = (session.accumulatedSeconds || 0) + 60;
-        const blockSeconds = tempoCallMinutes * 60;
-        const completedBlocks = Math.floor(newAccum / blockSeconds);
-        const remainder = newAccum % blockSeconds;
-        await prisma.pointsVoiceSession.update({ where: { id: session.id }, data: { channelId: channel.id, accumulatedSeconds: remainder, lastCheckedAt: new Date() } });
-        if (completedBlocks > 0 && awardPoints !== 0n) {
-          const totalAward = awardPoints * BigInt(completedBlocks);
-          await recordTransaction(prisma, cfg, { guildId, userId, amount: totalAward, type: 'CALL', source: 'SYSTEM', reason: 'Pontos por call' });
+          
+          const balance = await ensureBalance(prisma, cfg, guildId, userId);
+          let session = await prisma.pointsVoiceSession.findUnique({ 
+            where: { globalConfigId_guildId_userId: { globalConfigId, guildId, userId } } 
+          });
+          
+          if (!session) {
+            session = await prisma.pointsVoiceSession.create({ 
+              data: { 
+                globalConfigId, 
+                guildId, 
+                userId, 
+                channelId: channel.id, 
+                startedAt: new Date(), 
+                accumulatedSeconds: 0, 
+                lastCheckedAt: new Date() 
+              } 
+            });
+          }
+          
+          const newAccum = (session.accumulatedSeconds || 0) + 60;
+          const blockSeconds = tempoCallMinutes * 60;
+          const completedBlocks = Math.floor(newAccum / blockSeconds);
+          const remainder = newAccum % blockSeconds;
+          
+          await prisma.pointsVoiceSession.update({ 
+            where: { id: session.id }, 
+            data: { 
+              channelId: channel.id, 
+              accumulatedSeconds: remainder, 
+              lastCheckedAt: new Date() 
+            } 
+          });
+          
+          if (completedBlocks > 0 && awardPoints !== 0n) {
+            const totalAward = awardPoints * BigInt(completedBlocks);
+            await recordTransaction(prisma, cfg, { 
+              guildId, 
+              userId, 
+              amount: totalAward, 
+              type: 'CALL', 
+              source: 'SYSTEM', 
+              reason: 'Pontos por call' 
+            });
+          }
         }
       }
     }
+  } catch (error) {
+    console.error('[points] Erro em tickVoice:', error.message);
   }
 }
 
@@ -390,92 +576,127 @@ async function handleVoiceLeave({ guildId, userId, prisma, cfg }) {
   await prisma.pointsVoiceSession.deleteMany({ where: { globalConfigId, guildId, userId } }).catch(() => {});
 }
 
+/**
+ * Handler para membro entrando via convite
+ * Estados: PENDING (se tempoServerHours > 0), CONFIRMED (se instant ou confirmado depois), REVOKED (se falhou validação)
+ * Validações: idade da conta, anti-reentry (não paga se já confirmou antes)
+ * @param {Object} params - Parâmetros
+ * @param {string} params.guildId - ID da guild
+ * @param {string} params.inviterId - ID do convidador
+ * @param {string} params.inviteeId - ID do convidado
+ * @param {Date} [params.invitedAt] - Data do convite
+ * @param {number} [params.accountAgeDays] - Idade da conta em dias
+ * @param {Object} params.prisma - Cliente Prisma
+ * @param {Object} params.cfg - Configuração de pontos
+ * @returns {Promise<void>}
+ */
 async function handleInviteJoin({ guildId, inviterId, inviteeId, invitedAt, accountAgeDays, prisma, cfg }) {
-  if (!isInvitesEnabled(cfg)) return;
-  if (!inviterId || !inviteeId || inviterId === inviteeId) return;
-  const globalConfigId = cfg.globalConfigId || cfg.id;
-  const idadeMin = cfg.idadeContaDias || 0;
-  const antiReentry = cfg.inviteAntiReentryEnabled !== false;
-  // Se já foi confirmado alguma vez, nunca paga novamente (anti-farm) quando habilitado
-  const existing = await prisma.pointsInviteLedger.findUnique({ where: { guildId_inviteeId: { guildId, inviteeId } } });
-  if (antiReentry && existing?.confirmedAt) {
-    return; // já confirmou no passado, não gera pendência nem nova premiação
-  }
-  const tempoServerHours = cfg.tempoServerHours || 0;
-  if (accountAgeDays !== undefined && accountAgeDays < idadeMin) {
+  try {
+    if (!isInvitesEnabled(cfg)) return;
+    if (!inviterId || !inviteeId || inviterId === inviteeId) return;
+    
+    const globalConfigId = cfg.globalConfigId || cfg.id;
+    const idadeMin = cfg.idadeContaDias || 0;
+    const antiReentry = cfg.inviteAntiReentryEnabled !== false;
+    
+    // Anti-farm: se já foi confirmado alguma vez, nunca paga novamente
+    const existing = await prisma.pointsInviteLedger.findUnique({ 
+      where: { guildId_inviteeId: { guildId, inviteeId } } 
+    });
+    
+    if (antiReentry && existing?.confirmedAt) {
+      console.log(`[points] Invite reentry blocked: ${inviteeId} já foi confirmado anteriormente`);
+      return;
+    }
+    
+    const tempoServerHours = cfg.tempoServerHours || 0;
+    
+    // Validação de idade da conta
+    if (accountAgeDays !== undefined && accountAgeDays < idadeMin) {
+      await prisma.pointsInviteLedger.upsert({
+        where: { guildId_inviteeId: { guildId, inviteeId } },
+        update: { status: 'REVOKED', revokedAt: new Date(), revokedReason: 'IDADE_MINIMA' },
+        create: {
+          globalConfigId,
+          guildId,
+          inviterId,
+          inviteeId,
+          invitedAt: invitedAt || new Date(),
+          status: 'REVOKED',
+          revokedAt: new Date(),
+          revokedReason: 'IDADE_MINIMA',
+        },
+      });
+      return;
+    }
+
+    // Aprovação instantânea se tempoServerHours <= 0
+    if (tempoServerHours <= 0) {
+      let amount = toBigInt(cfg.pontosConvites || 0n);
+      if (amount > 0n) {
+        const bioStatus = await ensureBioAllowed(prisma, cfg, inviterId);
+        if (!bioStatus.allowed) {
+          amount = 0n;
+        }
+      }
+      const now = new Date();
+      await prisma.pointsInviteLedger.upsert({
+        where: { guildId_inviteeId: { guildId, inviteeId } },
+        update: {
+          inviterId,
+          invitedAt: invitedAt || now,
+          status: 'CONFIRMED',
+          confirmedAt: now,
+          revokedAt: null,
+          revokedReason: null,
+          pointsAwarded: amount,
+        },
+        create: {
+          globalConfigId,
+          guildId,
+          inviterId,
+          inviteeId,
+          invitedAt: invitedAt || now,
+          status: 'CONFIRMED',
+          confirmedAt: now,
+          pointsAwarded: amount,
+        },
+      });
+      if (amount !== 0n) {
+        await recordTransaction(prisma, cfg, { 
+          guildId, 
+          userId: inviterId, 
+          amount, 
+          type: 'INVITE', 
+          source: 'SYSTEM', 
+          reason: 'Convite válido' 
+        });
+      }
+      return;
+    }
+
+    // Criar entrada PENDING
     await prisma.pointsInviteLedger.upsert({
       where: { guildId_inviteeId: { guildId, inviteeId } },
-      update: { status: 'REVOKED', revokedAt: new Date(), revokedReason: 'IDADE_MINIMA' },
+      update: {
+        inviterId,
+        invitedAt: invitedAt || new Date(),
+        status: 'PENDING',
+        revokedAt: null,
+        revokedReason: null,
+      },
       create: {
         globalConfigId,
         guildId,
         inviterId,
         inviteeId,
         invitedAt: invitedAt || new Date(),
-        status: 'REVOKED',
-        revokedAt: new Date(),
-        revokedReason: 'IDADE_MINIMA',
+        status: 'PENDING',
       },
     });
-    return;
+  } catch (error) {
+    console.error('[points] Erro em handleInviteJoin:', { guildId, inviterId, inviteeId, error: error.message });
   }
-
-  // Aprovação instantânea se tempoServerHours <= 0
-  if (tempoServerHours <= 0) {
-    let amount = toBigInt(cfg.pontosConvites || 0n);
-    if (amount > 0n) {
-      const bioStatus = await ensureBioAllowed(prisma, cfg, inviterId);
-      if (!bioStatus.allowed) {
-        amount = 0n;
-      }
-    }
-    const now = new Date();
-    await prisma.pointsInviteLedger.upsert({
-      where: { guildId_inviteeId: { guildId, inviteeId } },
-      update: {
-        inviterId,
-        invitedAt: invitedAt || now,
-        status: 'CONFIRMED',
-        confirmedAt: now,
-        revokedAt: null,
-        revokedReason: null,
-        pointsAwarded: amount,
-      },
-      create: {
-        globalConfigId,
-        guildId,
-        inviterId,
-        inviteeId,
-        invitedAt: invitedAt || now,
-        status: 'CONFIRMED',
-        confirmedAt: now,
-        pointsAwarded: amount,
-      },
-    });
-    if (amount !== 0n) {
-      await recordTransaction(prisma, cfg, { guildId, userId: inviterId, amount, type: 'INVITE', source: 'SYSTEM', reason: 'Convite válido' });
-    }
-    return;
-  }
-
-  await prisma.pointsInviteLedger.upsert({
-    where: { guildId_inviteeId: { guildId, inviteeId } },
-    update: {
-      inviterId,
-      invitedAt: invitedAt || new Date(),
-      status: 'PENDING',
-      revokedAt: null,
-      revokedReason: null,
-    },
-    create: {
-      globalConfigId,
-      guildId,
-      inviterId,
-      inviteeId,
-      invitedAt: invitedAt || new Date(),
-      status: 'PENDING',
-    },
-  });
 }
 
 async function handleInviteLeave({ guildId, inviteeId, prisma, cfg }) {
