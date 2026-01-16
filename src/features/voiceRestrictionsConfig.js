@@ -1,4 +1,4 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelSelectMenuBuilder, RoleSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const { getProtectionsConfig, saveProtectionsConfig } = require('../services/protectionsConfig');
 
 const CUSTOM_IDS = {
@@ -9,8 +9,11 @@ const CUSTOM_IDS = {
   LOG_ACT: 'vr:logact',
   SUPPORT: 'vr:support',
   CONFIG_ANTISPAM: 'vr:configantispam',
+  CONFIG_PERMS: 'vr:configperms',
+  SET_PERMS: 'vr:setperms',
   MODAL_ANTISPAM: 'vr:modal_antispam',
   BACK: 'menu:back',
+  BACK_VR: 'vr:back',
 };
 
 function buildEmbed(cfg) {
@@ -21,6 +24,10 @@ function buildEmbed(cfg) {
     ? 'Monitorando selecionados'
     : '**Monitorando TODOS os canais do servidor**';
   
+  const rolesText = vr.allowedRoles?.length > 0 
+    ? vr.allowedRoles.map((r) => `<@&${r}>`).join(', ')
+    : 'Nenhum configurado (apenas admin)';
+  
   return new EmbedBuilder()
     .setTitle('⚙️ Restrições de Voz')
     .setDescription('Configure categorias/canais monitorados, logs e anti-spam.')
@@ -29,6 +36,7 @@ function buildEmbed(cfg) {
       { name: 'Status', value: vr.enabled ? '✅ Ativado' : '❌ Desativado', inline: true },
       { name: 'Restrições ativas', value: String((vr.restrictions || []).filter((r) => !r.removedAt).length), inline: true },
       { name: 'Modo', value: monitoringText, inline: true },
+      { name: '🔑 Cargos com permissão', value: rolesText, inline: false },
       { name: 'Categorias monitoradas', value: (vr.monitoredCategories || []).length ? vr.monitoredCategories.map((id) => `<#${id}>`).join(', ') : 'Nenhuma (monitora tudo)', inline: false },
       { name: 'Canais monitorados', value: (vr.monitoredChannels || []).length ? vr.monitoredChannels.map((id) => `<#${id}>`).join(', ') : 'Nenhum (monitora tudo)', inline: false },
       { name: 'Log comandos', value: vr.commandLogChannelId ? `<#${vr.commandLogChannelId}>` : '—', inline: true },
@@ -43,7 +51,10 @@ function buildComponents(cfg) {
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(CUSTOM_IDS.TOGGLE).setLabel(vr.enabled ? 'Desativar' : 'Ativar').setStyle(vr.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(CUSTOM_IDS.CONFIG_ANTISPAM).setLabel('⚙️ Configurar Anti-Spam').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(CUSTOM_IDS.CONFIG_ANTISPAM).setLabel('⚙️ Anti-Spam').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(CUSTOM_IDS.CONFIG_PERMS).setLabel('🔑 Permissões').setStyle(ButtonStyle.Primary),
+    ),
+    new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(CUSTOM_IDS.BACK).setLabel('Voltar').setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder().addComponents(
@@ -103,6 +114,52 @@ async function handleInteraction(interaction, ctx) {
     cfg.voiceRestrictions = cfg.voiceRestrictions || {};
     cfg.voiceRestrictions.enabled = !cfg.voiceRestrictions.enabled;
     await saveProtectionsConfig(prisma, cfg);
+    await refresh();
+    return true;
+  }
+  if (cid === CUSTOM_IDS.CONFIG_PERMS && interaction.isButton()) {
+    await interaction.deferUpdate().catch(() => {});
+    const cfg = await getProtectionsConfig(prisma);
+    const vr = cfg.voiceRestrictions || {};
+    
+    const embed = new EmbedBuilder()
+      .setTitle('🔑 Configurar Permissões')
+      .setDescription('Selecione os cargos que poderão usar os comandos de restrição de voz.\n\n**Cargos atuais:**\n' + (vr.allowedRoles?.length ? vr.allowedRoles.map((r) => `<@&${r}>`).join(', ') : 'Nenhum (apenas admin)'))
+      .setColor(0x5865f2);
+    
+    const select = new RoleSelectMenuBuilder()
+      .setCustomId(CUSTOM_IDS.SET_PERMS)
+      .setPlaceholder('Selecione os cargos com permissão')
+      .setMinValues(0)
+      .setMaxValues(10);
+    
+    if (vr.allowedRoles?.length) {
+      select.setDefaultRoles(...vr.allowedRoles);
+    }
+    
+    await interaction.editReply({
+      embeds: [embed],
+      components: [
+        new ActionRowBuilder().addComponents(select),
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId(CUSTOM_IDS.BACK_VR).setLabel('Voltar').setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    }).catch(() => {});
+    return true;
+  }
+  if (cid === CUSTOM_IDS.SET_PERMS && interaction.isRoleSelectMenu()) {
+    await interaction.deferUpdate().catch(() => {});
+    const roles = interaction.values || [];
+    const cfg = await getProtectionsConfig(prisma);
+    cfg.voiceRestrictions = cfg.voiceRestrictions || {};
+    cfg.voiceRestrictions.allowedRoles = roles;
+    await saveProtectionsConfig(prisma, cfg);
+    await refresh();
+    return true;
+  }
+  if (cid === CUSTOM_IDS.BACK_VR) {
+    await interaction.deferUpdate().catch(() => {});
     await refresh();
     return true;
   }

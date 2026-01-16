@@ -106,6 +106,8 @@ function defaultConfig() {
       commandLogChannelId: null,
       actionLogChannelId: null,
       supportChannelId: null,
+      dmNotifications: false,
+      allowedRoles: [],
       antiSpam: {
         maxAttempts: 3,
         windowSeconds: 60,

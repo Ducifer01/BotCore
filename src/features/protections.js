@@ -790,11 +790,6 @@ async function buildBackupPayload(interaction, prisma, session) {
 }
 
 async function presentRoot(interaction, prisma) {
-  if (action === 'select_category' && interaction.isChannelSelectMenu()) {
-    const categoryId = interaction.values?.[0] || null;
-    return go({ state: BACKUP_STATES.SELECT_CATEGORY, categoryId });
-  }
-
   await ensureDeferred(interaction);
   const cfg = await getProtectionsConfig(prisma);
   const embed = buildRootEmbed(cfg);

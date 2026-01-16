@@ -27,9 +27,13 @@ async function setVoiceRestrictionsConfig(prisma, updater) {
 
 async function addRestriction(prisma, userA, userB, { reason = null, authorId }) {
   const now = new Date().toISOString();
-  return setVoiceRestrictionsConfig(prisma, (prev) => {
-    const existing = findRestriction(prev, userA, userB);
-    if (existing) return prev; // já existe ativa
+  const cfg = await getProtectionsConfig(prisma);
+  const existing = findRestriction(cfg.voiceRestrictions || {}, userA, userB);
+  if (existing) {
+    return { success: false, reason: 'already_exists' };
+  }
+  
+  await setVoiceRestrictionsConfig(prisma, (prev) => {
     const pair = normalizePair(userA, userB);
     const next = { ...prev };
     next.restrictions = [...(prev.restrictions || []), {
@@ -40,6 +44,8 @@ async function addRestriction(prisma, userA, userB, { reason = null, authorId })
     }];
     return next;
   });
+  
+  return { success: true };
 }
 
 async function removeRestriction(prisma, userA, userB, { reason = null, authorId }) {
@@ -71,6 +77,14 @@ function isRestrictedPair(cfg, userA, userB) {
   return Boolean(cfg.restrictions.find((r) => r.a === a && r.b === b && !r.removedAt));
 }
 
+async function getUserRestrictions(prisma, userId) {
+  const cfg = await getVoiceRestrictionsConfig(prisma);
+  const restrictions = (cfg.restrictions || []).filter((r) => {
+    return !r.removedAt && (r.a === userId || r.b === userId);
+  });
+  return restrictions;
+}
+
 module.exports = {
   getVoiceRestrictionsConfig,
   setVoiceRestrictionsConfig,
@@ -78,4 +92,5 @@ module.exports = {
   removeRestriction,
   listRestrictions,
   isRestrictedPair,
+  getUserRestrictions,
 };

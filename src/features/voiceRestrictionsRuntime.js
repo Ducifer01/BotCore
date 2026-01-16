@@ -8,10 +8,15 @@ const attemptTracker = new Map();
 
 function pickTextChannelForVoice(voiceChannel) {
   if (!voiceChannel?.guild) return null;
-  const parentId = voiceChannel.parentId;
-  const guild = voiceChannel.guild;
-  const textInParent = guild.channels.cache.find((c) => c.parentId === parentId && c.type === ChannelType.GuildText && c.permissionsFor(guild.members.me || guild.client.user)?.has('SendMessages'));
-  return textInParent || null;
+  
+  // O próprio canal de voz tem um chat integrado, basta verificar se o bot pode enviar mensagens
+  if (voiceChannel.isVoiceBased() && voiceChannel.permissionsFor(voiceChannel.guild.members.me || voiceChannel.guild.client.user)?.has('SendMessages')) {
+    console.log('[voiceRestrictions] Usando chat do próprio canal de voz:', voiceChannel.id);
+    return voiceChannel;
+  }
+  
+  console.log('[voiceRestrictions] Bot não tem permissão para enviar no chat do canal de voz');
+  return null;
 }
 
 async function sendActionLog(guild, logChannelId, { entrant, occupant, channel, reason }) {
@@ -23,8 +28,8 @@ async function sendActionLog(guild, logChannelId, { entrant, occupant, channel, 
     .setColor(0xE74C3C)
     .setTimestamp(new Date())
     .addFields(
-      entrant ? { name: 'Entrante', value: `${entrant.user.tag} (${entrant.id})` } : null,
-      occupant ? { name: 'Em chamada com restrição', value: `${occupant.user.tag} (${occupant.id})` } : null,
+      entrant ? { name: 'Tentou entrar', value: `${entrant.user.tag} (${entrant.id})` } : null,
+      occupant ? { name: 'Estava em Call', value: `${occupant.user.tag} (${occupant.id})` } : null,
       channel ? { name: 'Canal', value: `<#${channel.id}>` } : null,
       reason ? { name: 'Motivo', value: reason } : null,
     ).toJSON();
@@ -40,7 +45,17 @@ async function notifyChannel(voiceChannel, entrant, occupant) {
 
 async function sendUserNotification(voiceChannel, supportChannelId, entrant) {
   const textChannel = pickTextChannelForVoice(voiceChannel);
-  if (!textChannel) return;
+  
+  console.log('[voiceRestrictions] Tentando enviar notificação:', {
+    hasTextChannel: !!textChannel,
+    textChannelId: textChannel?.id || null,
+    entrantId: entrant?.id
+  });
+  
+  if (!textChannel) {
+    console.warn('[voiceRestrictions] Nenhum canal de texto encontrado na categoria');
+    return;
+  }
   
   const supportMention = supportChannelId ? ` Qualquer dúvida, consulte o suporte <#${supportChannelId}>` : '';
   
@@ -50,9 +65,43 @@ async function sendUserNotification(voiceChannel, supportChannelId, entrant) {
     .setColor(0xfacc15)
     .setTimestamp();
   
-  const msg = await textChannel.send({ embeds: [embed] }).catch(() => null);
+  const msg = await textChannel.send({ embeds: [embed] }).catch((err) => {
+    console.warn('[voiceRestrictions] Erro ao enviar embed:', err?.message || err);
+    return null;
+  });
+  
   if (msg) {
+    console.log('[voiceRestrictions] Embed enviado com sucesso:', msg.id);
     setTimeout(() => msg.delete().catch(() => {}), 20000);
+  }
+}
+
+async function sendPunishmentNotification(voiceChannel, entrant, punishmentMinutes) {
+  const textChannel = pickTextChannelForVoice(voiceChannel);
+  
+  if (!textChannel) {
+    console.warn('[voiceRestrictions] Nenhum canal para enviar notificação de castigo');
+    return;
+  }
+  
+  const embed = new EmbedBuilder()
+    .setTitle('🚫 Usuário Castigado')
+    .setDescription(`${entrant} foi castigado por **${punishmentMinutes} minuto(s)** por insistir em entrar na call com restrição.`)
+    .addFields(
+      { name: 'Motivo', value: 'Desobedecendo a restrição imposta', inline: false },
+      { name: 'Duração', value: `${punishmentMinutes} minuto(s)`, inline: true }
+    )
+    .setColor(0xe74c3c)
+    .setTimestamp();
+  
+  const msg = await textChannel.send({ embeds: [embed] }).catch((err) => {
+    console.warn('[voiceRestrictions] Erro ao enviar embed de castigo:', err?.message || err);
+    return null;
+  });
+  
+  if (msg) {
+    console.log('[voiceRestrictions] Embed de castigo enviado:', msg.id);
+    setTimeout(() => msg.delete().catch(() => {}), 30000); // 30s para castigo
   }
 }
 
@@ -64,7 +113,7 @@ function trackAttempt(userId, cfg) {
   let record = attemptTracker.get(userId);
   
   if (!record || (now - record.firstAttempt) > windowMs) {
-    // Nova janela
+    // Nova janela - primeira tentativa
     record = { attempts: 1, firstAttempt: now, lastNotification: now };
     attemptTracker.set(userId, record);
     return { shouldNotify: true, shouldPunish: false, attempts: 1 };
@@ -72,11 +121,9 @@ function trackAttempt(userId, cfg) {
   
   // Incrementa tentativas
   record.attempts += 1;
-  const shouldNotify = (now - record.lastNotification) > 10000; // Só notifica se passou 10s da última
   
-  if (shouldNotify) {
-    record.lastNotification = now;
-  }
+  // NUNCA notifica em tentativas subsequentes (só na primeira)
+  const shouldNotify = false;
   
   attemptTracker.set(userId, record);
   
@@ -160,7 +207,9 @@ function register(client) {
       // Aplicar castigo se ultrapassou limite
       if (shouldPunish) {
         console.log('[voiceRestrictions] Limite excedido! Aplicando castigo...');
+        const punishmentMinutes = cfg.antiSpam?.punishmentMinutes || 5;
         await applyPunishment(guild, entrant, cfg, prisma);
+        await sendPunishmentNotification(channel, entrant, punishmentMinutes);
         // Limpar registro após punir
         attemptTracker.delete(entrant.id);
       }
